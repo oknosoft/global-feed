@@ -1,0 +1,36 @@
+{
+  "name": "global-feed",
+  "version": "0.0.3",
+  "description": "Аналог couchdb-changes для группы баз на массиве серверов",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/oknosoft/global-feed"
+  },
+  "engines": {
+    "node": ">=20.19",
+    "yarn": "^1.22"
+  },
+  "keywords": [
+    "metadata",
+    "couchdb",
+    "feed",
+    "changes",
+    "replication management"
+  ],
+  "author": "Evgeniy Malyarov <info@oknosoft.ru>",
+  "license": "SEE LICENSE IN LICENSE",
+  "homepage": "https://adm.oknosoft.ru",
+  "proxy": "http://localhost:3016/",
+  "dependencies": {
+    "pg": "^8.22",
+    "pouchdb-adapter-http": "9.0",
+    "pouchdb-core": "9.0",
+    "pouchdb-find": "9.0",
+    "qs": "^6.15",
+    "rate-limiter-flexible": "^11.2"
+  },
+  "devDependencies": {},
+  "packageManager": "yarn@1.22.22",
+  "scripts": {
+  }
+}

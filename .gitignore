@@ -1,0 +1,31 @@
+# Editor files
+.idea
+.vscode
+.nyc_output
+
+# TODO
+.github
+
+# OS files
+.DS_STORE
+
+# Exclude compiled files
+build/
+coverage/
+/.eslintcache
+/scripts/stats.json
+/scripts/wb.link.js
+/src/public/data/
+/server/mdm/cache/
+!/server/mdm/cache/.gitkeep
+/server/mdm/foroom/
+!/server/mdm/foroom/.gitkeep
+
+# Private config files
+
+
+# npm files
+node_modules
+*.lock
+*.log
+

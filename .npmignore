@@ -1,0 +1,11 @@
+.DS_Store
+.idea
+build
+config
+node_modules
+scripts
+src/public
+server/mdm/*.json
+
+/package-lock.json
+*.log
