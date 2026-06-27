@@ -10,6 +10,7 @@
     "node": ">=20.19",
     "yarn": "^1.22"
   },
+  "type": "module",
   "keywords": [
     "metadata",
     "couchdb",
