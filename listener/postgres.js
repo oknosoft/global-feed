@@ -1,6 +1,12 @@
 
 import {Client} from 'pg';
 
+function sleep() {
+  return new Promise((resolve) => {
+    setTimeout(resolve, 8);
+  });
+}
+
 export class Postgres {
 
   constructor() {
@@ -11,14 +17,35 @@ export class Postgres {
       password: env.PGPASSWORD,
       database: 'feed',
     });
+    this.busy = false;
   }
 
   query(sql, ...params) {
     const {client, connected} = this;
     const pre = connected ?
-      Promise.resolve() :
+      new Promise(async (resolve) => {
+        while(this.busy) {
+          await sleep();
+        }
+        resolve();
+      }) :
       client.connect().then(() => this.connected = true);
-    return pre.then(() => client.query(sql, ...params));
+
+    return pre.then(async () => {
+      while(this.busy) {
+        await sleep();
+      }
+      this.busy = true;
+      return client.query(sql, ...params);
+    })
+      .then((res) => {
+        this.busy = false;
+        return res;
+      })
+      .catch(err => {
+        this.busy = false;
+        throw err;
+      });
   }
 
   set(name, value) {
@@ -78,6 +105,19 @@ export class Postgres {
     return this.query(
       `call append($1, $2, $3, $4, $5, $6, $7, $8, $9, $10);`,
       [year, abonent, branch, type, ref, rev, deleted, partner, department, date]);
+  }
+
+  async stat(db) {
+    const {name} = db;
+    return await this.get(`stat:${name}`) || {
+      start: new Date().toISOString().substring(0, 19),
+      doc_count: 0,
+    };
+  }
+
+  setStat(db, stat) {
+    const {name} = db;
+    return this.set(`stat:${name}`, stat);
   }
 }
 

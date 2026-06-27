@@ -9,9 +9,18 @@ PouchDB
 
 const {DBUSER, DBPWD} = process.env;
 const timeout = 120000;
-const interval = 10000;
+const interval = 8000;
 const docCache = {};
 const classNames = /^(doc\.calc_order|cat\.characteristics)/;
+const nil = '00000000-0000-0000-0000-000000000000';
+
+function log(...args) {
+  console.log(new Date().toISOString().substring(5, 19), ...args);
+}
+
+function error(...args) {
+  console.error(new Date().toISOString().substring(5, 19), ...args);
+}
 
 /**
  * @summary Создаёт массив слушателей изменений массива баз Couchdb
@@ -71,9 +80,9 @@ class ServerListener {
   }
 
   /**
-   * @summary Возвращает информацию о текущем состоянии слушателей
+   * @summary Сохраняет в PG, текущую статистику
    */
-  async info() {
+  async stat() {
 
   }
 
@@ -95,6 +104,7 @@ class ServerListener {
     for(const name in bases) {
       await this.listenDb(bases[name]);
     }
+    setInterval(() => this.stat(), 300000);
   }
 
   async listenDb(db) {
@@ -102,6 +112,10 @@ class ServerListener {
     let res;
     if(!feeds.has(db)) {
       const since = await postgres.since(db);
+      const info = await db.info();
+      const initStat = await postgres.stat(db);
+      initStat.current = 0;
+      log(`listen ${db.name.split('//')[1]} since ${since?.substring(0, 30) || 'nil'}`);
       res = new Promise((resolve, reject) => {
         let resolved = false;
         const changes = db.changes({
@@ -114,19 +128,30 @@ class ServerListener {
             await this.reflect(db, change);
             if(!since && !resolved) {
               resolved = true;
-              setTimeout(resolve, interval);
+              setTimeout(resolve, interval + info.doc_count);
+            }
+            const feed = feeds.get(db);
+            feed.docs++;
+            if(feed.docs % 100 === 0) {
+              const newStat = {...initStat};
+              newStat.current = feed.docs;
+              newStat.doc_count += feed.docs;
+              await postgres.setStat(db, newStat);
+            }
+            if(feed.docs % 500 === 0) {
+              log(`reg ${db.name.split('//')[1]} ${feed.docs} changes`);
             }
           })
           .on('error', (err) => {
-            console.error(err);
-            changes.stop?.();
+            error(err);
+            changes.cancel?.();
             feeds.delete(db);
             setTimeout(() => this.listenDb(db), interval);
             reject();
           });
-        feeds.set(db, changes);
+        feeds.set(db, {feed: changes, docs: 0});
         if(since) {
-          setTimeout(resolve, 100);
+          setTimeout(resolve, 100 + info.doc_count - initStat.doc_count);
         }
       });
     }
@@ -148,7 +173,7 @@ class ServerListener {
         }
         catch (e) {
           if(e.status != 404) {
-            console.error(e);
+            error(e);
           }
         }
       }
@@ -163,10 +188,16 @@ class ServerListener {
     const {year, abonent, branch} = db.def;
     if(classNames.test(id)) {
       const [type, ref] = id.split('|');
-      const {partner, department} = doc;
+      let {partner, department} = doc;
       const date = await this.fetchDate(db, doc, ref);
       if(!deleted) {
         deleted = false;
+      }
+      if(!partner) {
+        partner = nil;
+      }
+      if(!department) {
+        department = nil;
       }
       await postgres.append({year, abonent, branch, type, ref, rev, deleted, partner, department, date});
       return postgres.setSince(db, seq);
