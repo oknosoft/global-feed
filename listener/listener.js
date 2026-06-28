@@ -16,6 +16,7 @@ const heartbeat = 25000;      // to keep long connections open
 const dateCache = {};             // даты документов
 const classNames = /^(doc\.calc_order|cat\.characteristics)/;
 const nil = '00000000-0000-0000-0000-000000000000';
+const fakeFunc = () => null;
 
 export function log(...args) {
   console.log(formatDate(), ...args);
@@ -140,14 +141,14 @@ class ServerListener {
     }
     setInterval(() => this.stat(), statInterval);
     for(const name in bases) {
-      await this.listenDb(bases[name]);
+      await this.listenDb(bases[name], true);
     }
   }
 
-  async listenDb(db) {
+  async listenDb(db, returnPromise) {
     const {feeds, postgres} = this;
     let res;
-    if(!feeds.has(db) || !feeds.get(db).feed) {
+    if(!feeds.has(db) || feeds.get(db).feed?.isCancelled) {
       const since = await postgres.since(db);
       const initInfo = await db.info();
       const initStat = await postgres.stat(db);
@@ -155,10 +156,11 @@ class ServerListener {
       Object.freeze(initInfo);
       log(`listen ${db.name.split('//')[1]} since ${since?.substring(0, 30) || 'nil'}`);
 
-      res = new Promise((resolve, reject) => {
+      const executor = (resolve, reject) => {
         const delta = initInfo.doc_count - initStat.all;
         const timeout = (since ? 100 : interval) + (delta > 0 ? delta : 0);
         const resolver = setTimeout(resolve, timeout);
+        let resolved = false;
         const restart = this.listenDb.bind(this, db);
         const changes = db.changes({
           since,
@@ -177,11 +179,14 @@ class ServerListener {
               }
               if(feed.feed && feed.docs > 2000) {
                 !feed.feed.isCancelled && feed.feed.cancel();
-                this.statDb(db);
-                delete feed.feed;
+                feed.restarter && clearTimeout(feed.restarter);
+                feed.restarter = setTimeout(restart, 100);
                 resolver && clearTimeout(resolver);
-                setTimeout(restart, 100);
-                resolve();
+                if(!resolved) {
+                  resolved = true;
+                  resolve();
+                }
+                this.statDb(db);
               }
             }
           })
@@ -189,9 +194,8 @@ class ServerListener {
             error(err);
             this.statError(db, err);
             const feed = feeds.get(db);
-            if(feed?.feed) {
-              !feed.feed.isCancelled && feed.feed.cancel();
-              delete feed.feed;
+            if(feed?.feed && !feed.feed.isCancelled) {
+              feed.feed.cancel();
             }
             resolver && clearTimeout(resolver);
             setTimeout(restart, interval);
@@ -199,7 +203,14 @@ class ServerListener {
           });
         const feed = feeds.get(db) || {};
         feeds.set(db, Object.assign(feed, {feed: changes, docs: 0, initStat, initInfo}));
-      });
+      };
+
+      if(returnPromise) {
+        res = new Promise(executor);
+      }
+      else {
+        executor(fakeFunc, fakeFunc);
+      }
     }
     return res;
   }
@@ -254,6 +265,7 @@ class ServerListener {
     const {feeds} = this;
     for(const [db, feed] of feeds) {
       feed.feed?.cancel?.();
+      feed.restarter && clearTimeout(feed.restarter);
     }
     feeds.clear();
   }
