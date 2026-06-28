@@ -11,10 +11,10 @@ PouchDB
 const {DBUSER, DBPWD} = process.env;
 const timeout = 120000;       // удлиняем время ответа для PouchDB
 const interval = 6000;        // задержка между базами на старте и при ошибке
-const statInterval = 180000;  // статистика раз в 5 минут
+const statInterval = 300000;  // статистика и перезапуск раз в 5 минут
 const heartbeat = 25000;      // to keep long connections open
 const dateCache = {};             // даты документов
-const queueLength = 2000;    // длина очереди
+const queueLength = 1000;    // длина очереди
 const classNames = /^(doc\.calc_order|cat\.characteristics)/;
 const nil = '00000000-0000-0000-0000-000000000000';
 const fakeFunc = () => null;
@@ -103,6 +103,12 @@ class AsyncStack extends Array {
     return super.push(...items);
   }
 
+  stopDb() {
+    const feed = this.#owner.feeds.get(this.#db);
+    feed.feed?.cancel?.();
+    this.#stop = true;
+  }
+
   async execute() {
     if(this.length) {
       // обработать элемент
@@ -114,10 +120,9 @@ class AsyncStack extends Array {
       if(this.#stop) {
         // остановить и перезапустить фид
         await this.#owner.statDb(this.#db);
-        this.#owner.stopDb(this.#db);
         clearTimeout(this.#other.resolveTimer);
         this.#other.resolve();
-        setTimeout(this.#owner.listenDb.bind(this.#owner, this.#db), interval);
+        setTimeout(this.#owner.listenDb.bind(this.#owner, this.#db), 100);
         return;
       }
       if(this.#idle < 80) {
@@ -125,7 +130,13 @@ class AsyncStack extends Array {
       }
     }
     if(this.length > queueLength) {
-      this.#stop = true;
+      this.stopDb();
+    }
+    else {
+      const feed = this.#owner.feeds.get(this.#db);
+      if(feed?.docs > queueLength || feed?.moment < (Date.now() - statInterval)) {
+        this.stopDb();
+      }
     }
     this.#timer = setTimeout(this.execute, this.#idle * sleepTimeout);
   }
@@ -165,10 +176,11 @@ class ServerListener {
     const {feeds, postgres} = this;
     const stat = feeds.get(db);
     const newStat = await postgres.stat(db);
-    if(stat.docs > newStat.current) {
+    const current = stat.initStat.current + stat.docs;
+    if(current > newStat.current) {
       const since = await postgres.since(db);
       newStat.since = since?.substring(0, 30) || 'nil';
-      newStat.current = stat.docs;
+      newStat.current = current;
       newStat.all = stat.initStat.all + stat.docs;
       delete newStat.error;
       await postgres.setStat(db, newStat);
@@ -179,7 +191,7 @@ class ServerListener {
     const {feeds, postgres} = this;
     const stat = feeds.get(db);
     const newStat = await postgres.stat(db);
-    newStat.current = stat.docs;
+    newStat.current = stat.initStat.current + stat.docs;
     newStat.all = stat.initStat.all + stat.docs;
     newStat.error = err.message || err;
     await postgres.setStat(db, newStat);
@@ -246,7 +258,7 @@ class ServerListener {
             reject();
           });
         const feed = feeds.get(db) || {};
-        feeds.set(db, Object.assign(feed, {feed: changes, docs: 0, initStat, initInfo}));
+        feeds.set(db, Object.assign(feed, {feed: changes, docs: 0, initStat, initInfo, moment: Date.now()}));
       };
 
       if(returnPromise) {
@@ -301,19 +313,16 @@ class ServerListener {
         department = nil;
       }
       await postgres.append({year, abonent, branch, type, ref, rev, deleted, partner, department, date});
-      await postgres.setSince(db, seq);
 
       const feed = feeds.get(db);
       if(feed) {
         feed.docs++;
-        if(feed.docs % 500 === 0) {
+        if(feed.docs % 600 === 0) {
           log(`reg ${db.name.split('//')[1]} ${feed.docs} changes`);
-        }
-        if(feed.feed && feed.docs > 70) {
-
         }
       }
     }
+    await postgres.setSince(db, seq);
   }
 
   stopDb(db) {
