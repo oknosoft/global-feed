@@ -3,7 +3,7 @@ import {Client} from 'pg';
 
 export function sleep() {
   return new Promise((resolve) => {
-    setTimeout(resolve, 8);
+    setTimeout(resolve, 6);
   });
 }
 

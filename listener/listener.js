@@ -149,11 +149,15 @@ class ServerListener {
     const {feeds, postgres} = this;
     let res;
     if(!feeds.has(db) || feeds.get(db).feed?.isCancelled) {
-      const since = await postgres.since(db);
+      let since = await postgres.since(db);
+      const feedSince = feeds.get(db)?.since;
       const initInfo = await db.info();
       const initStat = await postgres.stat(db);
       Object.freeze(initStat);
       Object.freeze(initInfo);
+      if(feedSince && feedSince > since) {
+        since = feedSince;
+      }
       log(`listen ${db.name.split('//')[1]} since ${since?.substring(0, 30) || 'nil'}`);
 
       const executor = (resolve, reject) => {
@@ -170,8 +174,8 @@ class ServerListener {
           heartbeat,
         })
           .on('change', async (change) => {
-            await this.reflect(db, change);
             const feed = feeds.get(db);
+            await this.reflect(db, change, feed);
             if(feed) {
               feed.docs++;
               if(feed.docs % 500 === 0) {
@@ -238,7 +242,7 @@ class ServerListener {
     return date;
   }
 
-  async reflect(db, change) {
+  async reflect(db, change, feed) {
     const {postgres} = this;
     let {id, changes, seq, doc, deleted} = change;
     const rev = changes?.[0]?.rev || doc._rev;
@@ -257,6 +261,12 @@ class ServerListener {
         department = nil;
       }
       await postgres.append({year, abonent, branch, type, ref, rev, deleted, partner, department, date});
+      if(feed) {
+        const {since} = feed;
+        if(!since || since < seq) {
+          feed.since = seq;
+        }
+      }
       return postgres.setSince(db, seq);
     }
   }
