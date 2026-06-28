@@ -11,7 +11,7 @@ PouchDB
 const {DBUSER, DBPWD} = process.env;
 const timeout = 120000;       // удлиняем время ответа для PouchDB
 const interval = 8000;        // задержка между базами на старте и при ошибке
-const statInterval = 300000;  // статистика раз в 5 минут
+const statInterval = 180000;  // статистика раз в 5 минут
 const heartbeat = 25000;      // to keep long connections open
 const dateCache = {};             // даты документов
 const classNames = /^(doc\.calc_order|cat\.characteristics)/;
@@ -150,6 +150,7 @@ class ServerListener {
       Object.freeze(initInfo);
       log(`listen ${db.name.split('//')[1]} since ${since?.substring(0, 30) || 'nil'}`);
       res = new Promise((resolve, reject) => {
+        const restart = this.listenDb.bind(this, db);
         const changes = db.changes({
           since,
           live: true,
@@ -164,14 +165,20 @@ class ServerListener {
             if(feed.docs % 500 === 0) {
               log(`reg ${db.name.split('//')[1]} ${feed.docs} changes`);
             }
+            if(feed.docs > 5000) {
+              changes.cancel?.();
+              feeds.delete(db);
+              resolve();
+              setTimeout(restart, 100);
+            }
           })
           .on('error', (err) => {
             error(err);
             this.statError(db, err);
             changes.cancel?.();
             feeds.delete(db);
-            setTimeout(() => this.listenDb(db), interval);
             reject();
+            setTimeout(restart, interval);
           });
         feeds.set(db, {feed: changes, docs: 0, initStat, initInfo});
         const delta = initInfo.doc_count - initStat.all;
