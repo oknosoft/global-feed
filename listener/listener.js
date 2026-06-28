@@ -333,7 +333,7 @@ class ServerListener {
       }
       catch (err) {
         const message = err.message || err;
-        error(db.name, id, );
+        error(db.name, id, message);
         this.stopDb(db);
         if(!message.includes('uuid: "')) {
           throw err;
