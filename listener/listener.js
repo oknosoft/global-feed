@@ -2,24 +2,27 @@
 import PouchDB from 'pouchdb-core';
 import adapterHttp from 'pouchdb-adapter-http';
 import pouchdbFind from 'pouchdb-find';
+import {formatDate} from './postgres.js';
 
 PouchDB
   .plugin(adapterHttp)
   .plugin(pouchdbFind);
 
 const {DBUSER, DBPWD} = process.env;
-const timeout = 120000;
-const interval = 8000;
-const docCache = {};
+const timeout = 120000;       // удлиняем время ответа для PouchDB
+const interval = 8000;        // задержка между базами на старте и при ошибке
+const statInterval = 300000;  // статистика раз в 5 минут
+const heartbeat = 25000;      // to keep long connections open
+const dateCache = {};             // даты документов
 const classNames = /^(doc\.calc_order|cat\.characteristics)/;
 const nil = '00000000-0000-0000-0000-000000000000';
 
 function log(...args) {
-  console.log(new Date().toISOString().substring(5, 19), ...args);
+  console.log(formatDate(), ...args);
 }
 
 function error(...args) {
-  console.error(new Date().toISOString().substring(5, 19), ...args);
+  console.error(formatDate(), ...args);
 }
 
 /**
@@ -30,21 +33,18 @@ export class GlobalListener {
 
   constructor(postgres) {
     this.postgres = postgres;
-    this.servers = {};
-  }
-
-  /**
-   * @summary Возвращает информацию о текущем состоянии слушателей
-   */
-  async info() {
-
+    this.abonents = new Map();
   }
 
   async listen() {
-    const {postgres, servers} = this;
+    const {postgres, abonents} = this;
     const items = await postgres.get('listen');
     for(const {year, abonent, skip} of items) {
       if(!skip) {
+        if(!abonents.has(abonent)) {
+          abonents.set(abonent, {});
+        }
+        const servers = abonents.get(abonent);
         const rows = await postgres.servers({year, abonent});
         for(const {addr} of rows) {
           if(!servers[addr]) {
@@ -53,8 +53,18 @@ export class GlobalListener {
         }
       }
     }
-    for(const addr in servers) {
-      await servers[addr].listen();
+    for(const [abonent, servers] of abonents) {
+      for(const addr in servers) {
+        await servers[addr].listen();
+      }
+    }
+  }
+
+  stopAll() {
+    for(const [abonent, servers] of this.abonents) {
+      for(const addr in servers) {
+        servers[addr].stopAll();
+      }
     }
   }
 }
@@ -65,10 +75,11 @@ export class GlobalListener {
  */
 class ServerListener {
 
-  constructor({year, postgres, addr}) {
+  constructor({year, abonent, postgres, addr}) {
+    this.year = year;
+    this.abonent = abonent;
     this.postgres = postgres;
     this.url = addr;
-    this.year = year;
     this.root = new PouchDB(`${addr}/_all_dbs`, {
       auth: {username: DBUSER, password: DBPWD},
       skip_setup: true,
@@ -83,28 +94,49 @@ class ServerListener {
    * @summary Сохраняет в PG, текущую статистику
    */
   async stat() {
+    const {feeds, postgres} = this;
+    for(const [db, stat] of feeds) {
+      const newStat = await postgres.stat(db);
+      if(stat.docs > newStat.current) {
+        newStat.current = stat.docs;
+        newStat.all = stat.initStat.all + stat.docs;
+        delete newStat.error;
+        await postgres.setStat(db, newStat);
+      }
+    }
+  }
 
+  async statError(db, err) {
+    const {feeds, postgres} = this;
+    const stat = feeds.get(db);
+    const newStat = await postgres.stat(db);
+    newStat.current = stat.docs;
+    newStat.all = stat.initStat.all + stat.docs;
+    newStat.error = err.message || err;
+    await postgres.setStat(db, newStat);
   }
 
   async listen() {
-    const {root, url, bases, year} = this;
+    const {root, url, bases, year, abonent} = this;
     const dbs = await root.info();
     for(const name of dbs) {
-      if(/^wb_.*doc/.test(name) && !bases[name]) {
-         const db = new PouchDB(`${url}/${name}`, {
-          auth: {username: DBUSER, password: DBPWD},
-          skip_setup: true,
-          ajax: {timeout},
-        });
+      if(name.startsWith(`wb_${abonent}`) && name.includes('_doc') && !bases[name]) {
         const parts = name.split('_');
-        db.def = {year, abonent: parseInt(parts[1]), branch: parts[3] ? parseInt(parts[3]) : 0};
-        bases[name] = db;
+        if(!parts[3] || /^\d+$/.test(parts[3])) {
+          const db = new PouchDB(`${url}/${name}`, {
+            auth: {username: DBUSER, password: DBPWD},
+            skip_setup: true,
+            ajax: {timeout},
+          });
+          db.def = {year, abonent: parseInt(parts[1]), branch: parts[3] ? parseInt(parts[3]) : 0};
+          bases[name] = db;
+        }
       }
     }
+    setInterval(() => this.stat(), statInterval);
     for(const name in bases) {
       await this.listenDb(bases[name]);
     }
-    setInterval(() => this.stat(), 300000);
   }
 
   async listenDb(db) {
@@ -112,47 +144,39 @@ class ServerListener {
     let res;
     if(!feeds.has(db)) {
       const since = await postgres.since(db);
-      const info = await db.info();
+      const initInfo = await db.info();
       const initStat = await postgres.stat(db);
-      initStat.current = 0;
+      Object.freeze(initStat);
+      Object.freeze(initInfo);
       log(`listen ${db.name.split('//')[1]} since ${since?.substring(0, 30) || 'nil'}`);
       res = new Promise((resolve, reject) => {
-        let resolved = false;
         const changes = db.changes({
           since,
           live: true,
           include_docs: true,
           style: 'all_docs',
+          heartbeat,
         })
           .on('change', async (change) => {
             await this.reflect(db, change);
-            if(!since && !resolved) {
-              resolved = true;
-              setTimeout(resolve, interval + info.doc_count);
-            }
             const feed = feeds.get(db);
             feed.docs++;
-            if(feed.docs % 100 === 0) {
-              const newStat = {...initStat};
-              newStat.current = feed.docs;
-              newStat.doc_count += feed.docs;
-              await postgres.setStat(db, newStat);
-            }
             if(feed.docs % 500 === 0) {
               log(`reg ${db.name.split('//')[1]} ${feed.docs} changes`);
             }
           })
           .on('error', (err) => {
             error(err);
+            this.statError(db, err);
             changes.cancel?.();
             feeds.delete(db);
             setTimeout(() => this.listenDb(db), interval);
             reject();
           });
-        feeds.set(db, {feed: changes, docs: 0});
-        if(since) {
-          setTimeout(resolve, 100 + info.doc_count - initStat.doc_count);
-        }
+        feeds.set(db, {feed: changes, docs: 0, initStat, initInfo});
+        const delta = initInfo.doc_count - initStat.all;
+        const timeout = (since ? 100 : interval) + (delta > 0 ? delta : 0);
+        setTimeout(resolve, timeout);
       });
     }
     return res;
@@ -161,15 +185,15 @@ class ServerListener {
   async fetchDate(db, doc, ref) {
     let {date} = doc;
     if(date) {
-      docCache[ref] = date;
+      dateCache[ref] = date;
     }
     else if(doc.calc_order) {
-      date = docCache[doc.calc_order];
+      date = dateCache[doc.calc_order];
       if(!date) {
         try {
           const raw = await db.get(`doc.calc_order|${doc.calc_order}`);
           date = raw.date;
-          docCache[doc.calc_order] = date;
+          dateCache[doc.calc_order] = date;
         }
         catch (e) {
           if(e.status != 404) {
@@ -204,8 +228,12 @@ class ServerListener {
     }
   }
 
-  async stopAll() {
-
+  stopAll() {
+    const {feeds} = this;
+    for(const [db, stat] of feeds) {
+      stat.feed?.cancel?.();
+    }
+    feeds.clear();
   }
 
 }

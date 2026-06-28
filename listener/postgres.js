@@ -1,10 +1,17 @@
 
 import {Client} from 'pg';
 
-function sleep() {
+export function sleep() {
   return new Promise((resolve) => {
     setTimeout(resolve, 8);
   });
+}
+
+export function formatDate(date) {
+  if(!date) {
+    date = new Date();
+  }
+  return date.toISOString().substring(0, 19).replace(/-/g, '');
 }
 
 export class Postgres {
@@ -110,14 +117,15 @@ export class Postgres {
   async stat(db) {
     const {name} = db;
     return await this.get(`stat:${name}`) || {
-      start: new Date().toISOString().substring(0, 19),
-      doc_count: 0,
+      start: formatDate(),
+      all: 0,
+      current: 0,
     };
   }
 
   setStat(db, stat) {
     const {name} = db;
-    return this.set(`stat:${name}`, stat);
+    return this.set(`stat:${name}`, {...stat, moment: formatDate()});
   }
 }
 
