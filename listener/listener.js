@@ -17,7 +17,7 @@ const dateCache = {};             // даты документов
 const classNames = /^(doc\.calc_order|cat\.characteristics)/;
 const nil = '00000000-0000-0000-0000-000000000000';
 
-function log(...args) {
+export function log(...args) {
   console.log(formatDate(), ...args);
 }
 
