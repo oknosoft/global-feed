@@ -94,15 +94,20 @@ class ServerListener {
    * @summary Сохраняет в PG, текущую статистику
    */
   async stat() {
+    for(const [db] of this.feeds) {
+      await this.statDb(db);
+    }
+  }
+
+  async statDb(db) {
     const {feeds, postgres} = this;
-    for(const [db, stat] of feeds) {
-      const newStat = await postgres.stat(db);
-      if(stat.docs > newStat.current) {
-        newStat.current = stat.docs;
-        newStat.all = stat.initStat.all + stat.docs;
-        delete newStat.error;
-        await postgres.setStat(db, newStat);
-      }
+    const stat = feeds.get(db);
+    const newStat = await postgres.stat(db);
+    if(stat.docs > newStat.current) {
+      newStat.current = stat.docs;
+      newStat.all = stat.initStat.all + stat.docs;
+      delete newStat.error;
+      await postgres.setStat(db, newStat);
     }
   }
 
@@ -142,7 +147,7 @@ class ServerListener {
   async listenDb(db) {
     const {feeds, postgres} = this;
     let res;
-    if(!feeds.has(db)) {
+    if(!feeds.has(db) || !feeds.get(db).feed) {
       const since = await postgres.since(db);
       const initInfo = await db.info();
       const initStat = await postgres.stat(db);
@@ -154,7 +159,7 @@ class ServerListener {
         const delta = initInfo.doc_count - initStat.all;
         const timeout = (since ? 100 : interval) + (delta > 0 ? delta : 0);
         const resolver = setTimeout(resolve, timeout);
-        const restart = () => this.listenDb(db);
+        const restart = this.listenDb.bind(this, db);
         const changes = db.changes({
           since,
           live: true,
@@ -165,28 +170,35 @@ class ServerListener {
           .on('change', async (change) => {
             await this.reflect(db, change);
             const feed = feeds.get(db);
-            feed.docs++;
-            if(feed.docs % 500 === 0) {
-              log(`reg ${db.name.split('//')[1]} ${feed.docs} changes`);
-            }
-            if(feed.docs > 5000) {
-              changes.cancel?.();
-              feeds.delete(db);
-              resolver && clearTimeout(resolver);
-              setTimeout(restart, 100);
-              resolve();
+            if(feed) {
+              feed.docs++;
+              if(feed.docs % 500 === 0) {
+                log(`reg ${db.name.split('//')[1]} ${feed.docs} changes`);
+              }
+              if(feed.feed && feed.docs > 2000) {
+                !feed.feed.isCancelled && feed.feed.cancel();
+                this.statDb(db);
+                delete feed.feed;
+                resolver && clearTimeout(resolver);
+                setTimeout(restart, 100);
+                resolve();
+              }
             }
           })
           .on('error', (err) => {
             error(err);
             this.statError(db, err);
-            changes.cancel?.();
-            feeds.delete(db);
+            const feed = feeds.get(db);
+            if(feed?.feed) {
+              !feed.feed.isCancelled && feed.feed.cancel();
+              delete feed.feed;
+            }
             resolver && clearTimeout(resolver);
             setTimeout(restart, interval);
             reject();
           });
-        feeds.set(db, {feed: changes, docs: 0, initStat, initInfo});
+        const feed = feeds.get(db) || {};
+        feeds.set(db, Object.assign(feed, {feed: changes, docs: 0, initStat, initInfo}));
       });
     }
     return res;
@@ -240,8 +252,8 @@ class ServerListener {
 
   stopAll() {
     const {feeds} = this;
-    for(const [db, stat] of feeds) {
-      stat.feed?.cancel?.();
+    for(const [db, feed] of feeds) {
+      feed.feed?.cancel?.();
     }
     feeds.clear();
   }
