@@ -114,7 +114,12 @@ class AsyncStack extends Array {
       // обработать элемент
       this.#idle = 1;
       const change = this.shift();
-      await this.#owner.reflect(this.#db, change);
+      try {
+        await this.#owner.reflect(this.#db, change);
+      }
+      catch (e) {
+        return;
+      }
     }
     else {
       if(this.#stop) {
@@ -315,13 +320,23 @@ class ServerListener {
       if(!department) {
         department = nil;
       }
-      await postgres.append({year, abonent, branch, type, ref, rev, deleted, partner, department, date});
+      try {
+        await postgres.append({year, abonent, branch, type, ref, rev, deleted, partner, department, date});
 
-      const feed = feeds.get(db);
-      if(feed) {
-        feed.docs++;
-        if(feed.docs % 600 === 0) {
-          log(`reg ${db.name.split('//')[1]} ${feed.docs} changes`);
+        const feed = feeds.get(db);
+        if(feed) {
+          feed.docs++;
+          if(feed.docs % 600 === 0) {
+            log(`reg ${db.name.split('//')[1]} ${feed.docs} changes`);
+          }
+        }
+      }
+      catch (err) {
+        const message = err.message || err;
+        error(db.name, id, );
+        this.stopDb(db);
+        if(!message.includes('uuid: "')) {
+          throw err;
         }
       }
     }
