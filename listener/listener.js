@@ -149,8 +149,11 @@ class ServerListener {
       Object.freeze(initStat);
       Object.freeze(initInfo);
       log(`listen ${db.name.split('//')[1]} since ${since?.substring(0, 30) || 'nil'}`);
+      const restart = this.listenDb.bind(this, db);
       res = new Promise((resolve, reject) => {
-        const restart = this.listenDb.bind(this, db);
+        const delta = initInfo.doc_count - initStat.all;
+        const timeout = (since ? 100 : interval) + (delta > 0 ? delta : 0);
+        const resolver = setTimeout(resolve, timeout);
         const changes = db.changes({
           since,
           live: true,
@@ -168,8 +171,9 @@ class ServerListener {
             if(feed.docs > 5000) {
               changes.cancel?.();
               feeds.delete(db);
-              resolve();
+              resolver && clearTimeout(resolver);
               setTimeout(restart, 100);
+              resolve();
             }
           })
           .on('error', (err) => {
@@ -177,13 +181,11 @@ class ServerListener {
             this.statError(db, err);
             changes.cancel?.();
             feeds.delete(db);
-            reject();
+            resolver && clearTimeout(resolver);
             setTimeout(restart, interval);
+            reject();
           });
         feeds.set(db, {feed: changes, docs: 0, initStat, initInfo});
-        const delta = initInfo.doc_count - initStat.all;
-        const timeout = (since ? 100 : interval) + (delta > 0 ? delta : 0);
-        setTimeout(resolve, timeout);
       });
     }
     return res;
