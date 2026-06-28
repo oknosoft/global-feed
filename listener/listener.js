@@ -2,7 +2,7 @@
 import PouchDB from 'pouchdb-core';
 import adapterHttp from 'pouchdb-adapter-http';
 import pouchdbFind from 'pouchdb-find';
-import {formatDate} from './postgres.js';
+import {formatDate, sleepTimeout} from './postgres.js';
 
 PouchDB
   .plugin(adapterHttp)
@@ -10,10 +10,11 @@ PouchDB
 
 const {DBUSER, DBPWD} = process.env;
 const timeout = 120000;       // удлиняем время ответа для PouchDB
-const interval = 8000;        // задержка между базами на старте и при ошибке
+const interval = 6000;        // задержка между базами на старте и при ошибке
 const statInterval = 180000;  // статистика раз в 5 минут
 const heartbeat = 25000;      // to keep long connections open
 const dateCache = {};             // даты документов
+const queueLength = 2000;    // длина очереди
 const classNames = /^(doc\.calc_order|cat\.characteristics)/;
 const nil = '00000000-0000-0000-0000-000000000000';
 const fakeFunc = () => null;
@@ -71,6 +72,66 @@ export class GlobalListener {
 }
 
 /**
+ * @summary Асинхронная очередь для обработки changes
+ * @param {ServerListener} owner
+ * @param {PouchDB} db
+ */
+class AsyncStack extends Array {
+
+  #owner = null;
+  #db = null;
+  #other = null;
+  #idle = 1;
+  #stop = false;
+  #timer = null;
+
+  constructor({owner, db, ...other}) {
+    super();
+    this.execute = this.execute.bind(this);
+    this.#owner = owner;
+    this.#db = db;
+    this.#other = other;
+    this.#timer = setTimeout(this.execute, sleepTimeout);
+  }
+
+  push(...items) {
+    if(this.#idle > 1) {
+      this.#idle = 1;
+      clearTimeout(this.#timer);
+      this.#timer = setTimeout(this.execute, sleepTimeout);
+    }
+    return super.push(...items);
+  }
+
+  async execute() {
+    if(this.length) {
+      // обработать элемент
+      this.#idle = 1;
+      const change = this.shift();
+      await this.#owner.reflect(this.#db, change);
+    }
+    else {
+      if(this.#stop) {
+        // остановить и перезапустить фид
+        await this.#owner.statDb(this.#db);
+        this.#owner.stopDb(this.#db);
+        clearTimeout(this.#other.resolveTimer);
+        this.#other.resolve();
+        setTimeout(this.#owner.listenDb.bind(this.#owner, this.#db), interval);
+        return;
+      }
+      if(this.#idle < 80) {
+        this.#idle++;
+      }
+    }
+    if(this.length > queueLength) {
+      this.#stop = true;
+    }
+    this.#timer = setTimeout(this.execute, this.#idle * sleepTimeout);
+  }
+}
+
+/**
  * @summary Создаёт слушателей изменений массива баз Couchdb
  * @desc На конкретном сервере
  */
@@ -105,6 +166,8 @@ class ServerListener {
     const stat = feeds.get(db);
     const newStat = await postgres.stat(db);
     if(stat.docs > newStat.current) {
+      const since = await postgres.since(db);
+      newStat.since = since?.substring(0, 30) || 'nil';
       newStat.current = stat.docs;
       newStat.all = stat.initStat.all + stat.docs;
       delete newStat.error;
@@ -149,60 +212,37 @@ class ServerListener {
     const {feeds, postgres} = this;
     let res;
     if(!feeds.has(db) || feeds.get(db).feed?.isCancelled) {
-      let since = await postgres.since(db);
-      const feedSince = feeds.get(db)?.since;
+      const since = await postgres.since(db);
       const initInfo = await db.info();
       const initStat = await postgres.stat(db);
       Object.freeze(initStat);
       Object.freeze(initInfo);
-      if(feedSince && feedSince > since) {
-        since = feedSince;
-      }
       log(`listen ${db.name.split('//')[1]} since ${since?.substring(0, 30) || 'nil'}`);
+
 
       const executor = (resolve, reject) => {
         const delta = initInfo.doc_count - initStat.all;
         const timeout = (since ? 100 : interval) + (delta > 0 ? delta : 0);
-        const resolver = setTimeout(resolve, timeout);
-        let resolved = false;
-        const restart = this.listenDb.bind(this, db);
+        const resolveTimer = setTimeout(resolve, timeout);
+        const queue = new AsyncStack({owner: this, db, resolve, resolveTimer});
+
         const changes = db.changes({
           since,
           live: true,
           include_docs: true,
+          return_docs: false,
           style: 'all_docs',
           heartbeat,
         })
-          .on('change', async (change) => {
-            const feed = feeds.get(db);
-            await this.reflect(db, change, feed);
-            if(feed) {
-              feed.docs++;
-              if(feed.docs % 500 === 0) {
-                log(`reg ${db.name.split('//')[1]} ${feed.docs} changes`);
-              }
-              if(feed.feed && feed.docs > 2000) {
-                !feed.feed.isCancelled && feed.feed.cancel();
-                feed.restarter && clearTimeout(feed.restarter);
-                feed.restarter = setTimeout(restart, 100);
-                resolver && clearTimeout(resolver);
-                if(!resolved) {
-                  resolved = true;
-                  resolve();
-                }
-                this.statDb(db);
-              }
-            }
+          .on('change', (change) => {
+            queue.push(change);
           })
           .on('error', (err) => {
             error(err);
             this.statError(db, err);
-            const feed = feeds.get(db);
-            if(feed?.feed && !feed.feed.isCancelled) {
-              feed.feed.cancel();
-            }
-            resolver && clearTimeout(resolver);
-            setTimeout(restart, interval);
+            this.stopDb(db);
+            clearTimeout(resolveTimer);
+            setTimeout(this.listenDb.bind(this, db), interval);
             reject();
           });
         const feed = feeds.get(db) || {};
@@ -242,8 +282,8 @@ class ServerListener {
     return date;
   }
 
-  async reflect(db, change, feed) {
-    const {postgres} = this;
+  async reflect(db, change) {
+    const {feeds, postgres} = this;
     let {id, changes, seq, doc, deleted} = change;
     const rev = changes?.[0]?.rev || doc._rev;
     const {year, abonent, branch} = db.def;
@@ -261,21 +301,32 @@ class ServerListener {
         department = nil;
       }
       await postgres.append({year, abonent, branch, type, ref, rev, deleted, partner, department, date});
+      await postgres.setSince(db, seq);
+
+      const feed = feeds.get(db);
       if(feed) {
-        const {since} = feed;
-        if(!since || since < seq) {
-          feed.since = seq;
+        feed.docs++;
+        if(feed.docs % 500 === 0) {
+          log(`reg ${db.name.split('//')[1]} ${feed.docs} changes`);
+        }
+        if(feed.feed && feed.docs > 70) {
+
         }
       }
-      return postgres.setSince(db, seq);
+    }
+  }
+
+  stopDb(db) {
+    const feed = this.feeds.get(db);
+    if(feed) {
+      feed.feed?.cancel?.();
     }
   }
 
   stopAll() {
     const {feeds} = this;
-    for(const [db, feed] of feeds) {
-      feed.feed?.cancel?.();
-      feed.restarter && clearTimeout(feed.restarter);
+    for(const [db] of feeds) {
+      this.stopDb(db);
     }
     feeds.clear();
   }

@@ -1,9 +1,10 @@
 
 import {Client} from 'pg';
 
+export const sleepTimeout = 6;
 export function sleep() {
   return new Promise((resolve) => {
-    setTimeout(resolve, 6);
+    setTimeout(resolve, sleepTimeout);
   });
 }
 
