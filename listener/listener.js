@@ -134,8 +134,10 @@ class AsyncStack extends Array {
     }
     else {
       const feed = this.#owner.feeds.get(this.#db);
-      if(feed?.docs > queueLength || feed?.moment < (Date.now() - statInterval)) {
-        this.stopDb();
+      if(feed?.docs) {
+        if(feed.docs > queueLength || feed?.moment < (Date.now() - statInterval)) {
+          this.stopDb();
+        }
       }
     }
     this.#timer = setTimeout(this.execute, this.#idle * sleepTimeout);
@@ -227,6 +229,7 @@ class ServerListener {
       const since = await postgres.since(db);
       const initInfo = await db.info();
       const initStat = await postgres.stat(db);
+      initStat.current = 0;
       Object.freeze(initStat);
       Object.freeze(initInfo);
       log(`listen ${db.name.split('//')[1]} since ${since?.substring(0, 30) || 'nil'}`);
