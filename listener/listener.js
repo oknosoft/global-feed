@@ -149,11 +149,12 @@ class ServerListener {
       Object.freeze(initStat);
       Object.freeze(initInfo);
       log(`listen ${db.name.split('//')[1]} since ${since?.substring(0, 30) || 'nil'}`);
-      const restart = this.listenDb.bind(this, db);
+
       res = new Promise((resolve, reject) => {
         const delta = initInfo.doc_count - initStat.all;
         const timeout = (since ? 100 : interval) + (delta > 0 ? delta : 0);
         const resolver = setTimeout(resolve, timeout);
+        const restart = () => this.listenDb(db);
         const changes = db.changes({
           since,
           live: true,
