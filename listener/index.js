@@ -1,11 +1,14 @@
 
 import {Postgres} from './postgres.js';
 import {GlobalListener, log} from './listener.js';
+import {branchesOrder} from './branches.js';
 
 // запускаем слушатель
-setTimeout(() => {
+setTimeout(async () => {
+
   const postgres = new Postgres();
-  const listener = new GlobalListener(postgres);
+  const branches = await branchesOrder();
+  const listener = new GlobalListener(postgres, branches);
   listener.listen();
 
   // планируем перезапуск

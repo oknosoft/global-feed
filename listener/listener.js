@@ -1,13 +1,12 @@
 
 import {formatDate} from './postgres.js';
-import {Couchdb} from './couchdb.js';
+import {Couchdb, nil} from './couchdb.js';
 
 const {DBUSER, DBPWD} = process.env;
 const interval = 6000;        // задержка между базами на старте и при ошибке
 const statInterval = 300000;  // статистика и перезапуск раз в 5 минут
 const dateCache = {};             // даты документов
 const classNames = /^(doc\.calc_order|cat\.characteristics)/;
-const nil = '00000000-0000-0000-0000-000000000000';
 const fakeFunc = () => null;
 
 export function log(...args) {
@@ -24,8 +23,9 @@ function logError(...args) {
  */
 export class GlobalListener {
 
-  constructor(postgres) {
+  constructor(postgres, branches) {
     this.postgres = postgres;
+    this.branches = branches;
     this.abonents = new Map();
   }
 

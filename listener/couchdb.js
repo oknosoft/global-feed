@@ -2,6 +2,8 @@
 // import EventEmitter from 'node:events';
 import {sleepTimeout} from './postgres.js';
 
+export const nil = '00000000-0000-0000-0000-000000000000';
+
 class Subscriber {
 
   constructor(owner, opts) {
@@ -72,10 +74,14 @@ export class Couchdb {
     });
   }
 
-  info() {
+  fetch(path = '', opts) {
     const {name, headers} = this;
-    return fetch(name, {headers})
+    return fetch(name + path, {headers, ...opts})
       .then(res => res.json());
+  }
+
+  info() {
+    return this.fetch();
   }
 
   changes(opts) {
