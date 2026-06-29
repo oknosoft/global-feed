@@ -24,9 +24,6 @@
   "proxy": "http://localhost:3016/",
   "dependencies": {
     "pg": "^8.22",
-    "pouchdb-adapter-http": "9.0",
-    "pouchdb-core": "9.0",
-    "pouchdb-find": "9.0",
     "qs": "^6.15",
     "rate-limiter-flexible": "^11.2"
   },

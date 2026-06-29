@@ -1,0 +1,90 @@
+
+// import EventEmitter from 'node:events';
+import {sleepTimeout} from './postgres.js';
+
+class Subscriber {
+
+  constructor(owner, opts) {
+    this.owner = owner;
+    this.since = opts.since;
+    this.allReaded = false;
+    this.handlers = {};
+    this.fetch = this.fetch.bind(this);
+    Promise.resolve().then(this.fetch);
+  }
+
+  on(event, handler) {
+    this.handlers[event] = handler;
+    return this;
+  }
+
+  async fetch() {
+    if(this.isCancelled) {
+      return;
+    }
+    const {since, owner: {name, headers}, allReaded, handlers} = this;
+    let url = `${name}/_changes?heartbeat=40000&style=all_docs&include_docs=true&limit=30&feed=longpoll`;
+    if(since) {
+      url += `&since=${since}`;
+    }
+    if(!headers.has('Connection')) {
+      headers.set('Connection', 'keep-alive');
+    }
+
+    try {
+      this.controller = new AbortController();
+      const { signal } = this.controller;
+      const {last_seq, results, pending} = await fetch(url, {headers, signal})
+        .then(res => res.json());
+      const {change} = handlers;
+      for(const item of results) {
+        await change(item);
+        this.since = item.seq;
+      }
+      if(!pending && !allReaded) {
+        this.allReaded = true;
+        handlers.allReaded?.();
+      }
+      if(!this.isCancelled) {
+        setTimeout(this.fetch, sleepTimeout);
+      }
+    }
+    catch (e) {
+      if (e.name !== 'AbortError') {
+        this.handlers.error(e);
+      }
+    }
+  }
+
+  cancel() {
+    this.controller?.abort();
+    this.isCancelled = true;
+  }
+}
+
+export class Couchdb {
+
+  constructor(name, {auth}) {
+    this.name = name;
+    this.headers = new Headers({
+      Accept: 'application/json',
+      Authorization: `Basic ${Buffer.from(auth.username + ':' + auth.password, 'utf8').toString('base64')}`,
+    });
+  }
+
+  info() {
+    const {name, headers} = this;
+    return fetch(name, {headers})
+      .then(res => res.json());
+  }
+
+  changes(opts) {
+    return new Subscriber(this, opts);
+  }
+
+  get(id) {
+    const {name, headers} = this;
+    return fetch(`${name}/${id}`, {headers})
+      .then(res => res.json());
+  }
+}

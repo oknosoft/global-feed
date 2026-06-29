@@ -72,7 +72,7 @@ export class Postgres {
     return rows;
   }
 
-  async setServers({yerar, abonent, branch, addr}) {
+  async setServers({year, abonent, branch, addr}) {
 
   }
 

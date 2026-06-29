@@ -1,20 +1,11 @@
 
-import PouchDB from 'pouchdb-core';
-import adapterHttp from 'pouchdb-adapter-http';
-import pouchdbFind from 'pouchdb-find';
-import {formatDate, sleepTimeout} from './postgres.js';
-
-PouchDB
-  .plugin(adapterHttp)
-  .plugin(pouchdbFind);
+import {formatDate} from './postgres.js';
+import {Couchdb} from './couchdb.js';
 
 const {DBUSER, DBPWD} = process.env;
-const timeout = 120000;       // удлиняем время ответа для PouchDB
 const interval = 6000;        // задержка между базами на старте и при ошибке
 const statInterval = 300000;  // статистика и перезапуск раз в 5 минут
-const heartbeat = 25000;      // to keep long connections open
 const dateCache = {};             // даты документов
-const queueLength = 1000;    // длина очереди
 const classNames = /^(doc\.calc_order|cat\.characteristics)/;
 const nil = '00000000-0000-0000-0000-000000000000';
 const fakeFunc = () => null;
@@ -23,7 +14,7 @@ export function log(...args) {
   console.log(formatDate(), ...args);
 }
 
-function error(...args) {
+function logError(...args) {
   console.error(formatDate(), ...args);
 }
 
@@ -72,84 +63,6 @@ export class GlobalListener {
 }
 
 /**
- * @summary Асинхронная очередь для обработки changes
- * @param {ServerListener} owner
- * @param {PouchDB} db
- */
-class AsyncStack extends Array {
-
-  #owner = null;
-  #db = null;
-  #other = null;
-  #idle = 1;
-  #stop = false;
-  #timer = null;
-
-  constructor({owner, db, ...other}) {
-    super();
-    this.execute = this.execute.bind(this);
-    this.#owner = owner;
-    this.#db = db;
-    this.#other = other;
-    this.#timer = setTimeout(this.execute, sleepTimeout);
-  }
-
-  push(...items) {
-    if(this.#idle > 1) {
-      this.#idle = 1;
-      clearTimeout(this.#timer);
-      this.#timer = setTimeout(this.execute, sleepTimeout);
-    }
-    return super.push(...items);
-  }
-
-  stopDb() {
-    const feed = this.#owner.feeds.get(this.#db);
-    feed.feed?.cancel?.();
-    this.#stop = true;
-  }
-
-  async execute() {
-    if(this.length) {
-      // обработать элемент
-      this.#idle = 1;
-      const change = this.shift();
-      try {
-        await this.#owner.reflect(this.#db, change);
-      }
-      catch (e) {
-        return;
-      }
-    }
-    else {
-      if(this.#stop) {
-        // остановить и перезапустить фид
-        await this.#owner.statDb(this.#db);
-        clearTimeout(this.#other.resolveTimer);
-        this.#other.resolve();
-        setTimeout(this.#owner.listenDb.bind(this.#owner, this.#db), 100);
-        return;
-      }
-      if(this.#idle < 80) {
-        this.#idle++;
-      }
-    }
-    if(this.length > queueLength) {
-      this.stopDb();
-    }
-    else {
-      const feed = this.#owner.feeds.get(this.#db);
-      if(feed?.docs) {
-        if(feed.docs > queueLength || feed?.moment < (Date.now() - statInterval)) {
-          this.stopDb();
-        }
-      }
-    }
-    this.#timer = setTimeout(this.execute, this.#idle * sleepTimeout);
-  }
-}
-
-/**
  * @summary Создаёт слушателей изменений массива баз Couchdb
  * @desc На конкретном сервере
  */
@@ -160,7 +73,7 @@ class ServerListener {
     this.abonent = abonent;
     this.postgres = postgres;
     this.url = addr;
-    this.root = new PouchDB(`${addr}/_all_dbs`, {
+    this.root = new Couchdb(`${addr}/_all_dbs`, {
       auth: {username: DBUSER, password: DBPWD},
       skip_setup: true,
     });
@@ -211,10 +124,9 @@ class ServerListener {
       if(name.startsWith(`wb_${abonent}`) && name.includes('_doc') && !bases[name]) {
         const parts = name.split('_');
         if(!parts[3] || /^\d+$/.test(parts[3])) {
-          const db = new PouchDB(`${url}/${name}`, {
+          const db = new Couchdb(`${url}/${name}`, {
             auth: {username: DBUSER, password: DBPWD},
             skip_setup: true,
-            ajax: {timeout},
           });
           db.def = {year, abonent: parseInt(parts[1]), branch: parts[3] ? parseInt(parts[3]) : 0};
           bases[name] = db;
@@ -244,7 +156,6 @@ class ServerListener {
         const delta = initInfo.doc_count - initStat.all;
         const timeout = (since ? 100 : interval) + (delta > 0 ? delta : 0);
         const resolveTimer = setTimeout(resolve, timeout);
-        const queue = new AsyncStack({owner: this, db, resolve, resolveTimer});
 
         const changes = db.changes({
           since,
@@ -252,14 +163,15 @@ class ServerListener {
           include_docs: true,
           return_docs: false,
           style: 'all_docs',
-          heartbeat,
         })
-          .on('change', (change) => {
-            queue.push(change);
+          .on('change', (change) => this.reflect(db, change))
+          .on('allReaded', () => {
+            clearTimeout(resolveTimer);
+            resolve();
           })
-          .on('error', (err) => {
-            error(err);
-            this.statError(db, err);
+          .on('error', async (err) => {
+            logError(err);
+            await this.statError(db, err);
             this.stopDb(db);
             clearTimeout(resolveTimer);
             setTimeout(this.listenDb.bind(this, db), interval);
@@ -294,7 +206,7 @@ class ServerListener {
         }
         catch (e) {
           if(e.status != 404) {
-            error(e);
+            logError(e);
           }
         }
       }
@@ -333,9 +245,10 @@ class ServerListener {
       }
       catch (err) {
         const message = err.message || err;
-        error(db.name, id, message);
-        this.stopDb(db);
+        logError(db.name, id, message);
+        // остановка на всех ошибках, кроме формата uuid
         if(!message.includes('uuid: "')) {
+          this.stopDb(db);
           throw err;
         }
       }
