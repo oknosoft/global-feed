@@ -135,13 +135,12 @@ class ServerListener {
     }
     setInterval(() => this.stat(), statInterval);
     for(const name in bases) {
-      await this.listenDb(bases[name], true);
+      await this.listenDb(bases[name]);
     }
   }
 
-  async listenDb(db, returnPromise) {
+  async listenDb(db) {
     const {feeds, postgres} = this;
-    let res;
     if(!feeds.has(db) || feeds.get(db).feed?.isCancelled) {
       const since = await postgres.since(db);
       const initInfo = await db.info();
@@ -151,10 +150,12 @@ class ServerListener {
       Object.freeze(initInfo);
       log(`listen ${db.name.split('//')[1]} since ${since?.substring(0, 30) || 'nil'}`);
 
-
-      const executor = (resolve, reject) => {
+      return new Promise((resolve, reject) => {
         const delta = initInfo.doc_count - initStat.all;
-        const timeout = (since ? 100 : interval) + (delta > 0 ? delta : 0);
+        let timeout = (since ? 100 : interval) + (delta > 0 ? delta : 0);
+        if(timeout > 15 * 60000) {
+          timeout = 15 * 60000;
+        }
         const resolveTimer = setTimeout(resolve, timeout);
 
         const changes = db.changes({
@@ -179,16 +180,8 @@ class ServerListener {
           });
         const feed = feeds.get(db) || {};
         feeds.set(db, Object.assign(feed, {feed: changes, docs: 0, initStat, initInfo, moment: Date.now()}));
-      };
-
-      if(returnPromise) {
-        res = new Promise(executor);
-      }
-      else {
-        executor(fakeFunc, fakeFunc);
-      }
+      });
     }
-    return res;
   }
 
   async fetchDate(db, doc, ref) {
