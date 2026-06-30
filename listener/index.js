@@ -11,7 +11,7 @@ setTimeout(async () => {
   const listener = new GlobalListener(postgres, branches);
   listener.listen();
 
-  // планируем перезапуск
+  // планируем перезапуск по ночам
   const reloadAt = new Date();
   reloadAt.setDate(reloadAt.getDate() + 1);
   reloadAt.setHours(3, 30, 0);

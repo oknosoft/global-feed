@@ -9,6 +9,9 @@ export function sleep() {
   });
 }
 
+/**
+ * @summary Формат даты для логов
+ */
 export function formatDate(date) {
   if(!date) {
     date = new Date();
@@ -18,13 +21,19 @@ export function formatDate(date) {
   return date.toISOString().substring(0, 19);
 }
 
-export function reformatDate(src) {
-  if(!src.includes('-')) {
-    src = `${src.substring(0,4)}-${src.substring(4,6)}-${src.substring(6)}`;
+/**
+ * @summary Читает дату из строки лога
+ */
+export function reformatDate(str) {
+  if(!str.includes('-')) {
+    str = `${str.substring(0,4)}-${str.substring(4,6)}-${str.substring(6)}`;
   }
-  return new Date(src);
+  return new Date(str);
 }
 
+/**
+ * @summary Интерфейс к Postgres
+ */
 export class Postgres {
 
   constructor() {
@@ -38,15 +47,17 @@ export class Postgres {
     this.busy = false;
   }
 
-  query(sql, ...params) {
+  /**
+   * @summary Выполняет произвольный запрос
+   * @desc Ждёт окончания предыдущего запроса, если клиент занят
+   * @param {String} sql - Текс запроса
+   * @param {Array.<*>} [values] - Массив параметров
+   * @return {Promise<*>}
+   */
+  query(sql, values) {
     const {client, connected} = this;
     const pre = connected ?
-      new Promise(async (resolve) => {
-        while(this.busy) {
-          await sleep();
-        }
-        resolve();
-      }) :
+      Promise.resolve() :
       client.connect().then(() => this.connected = true);
 
     return pre.then(async () => {
@@ -54,7 +65,7 @@ export class Postgres {
         await sleep();
       }
       this.busy = true;
-      return client.query(sql, ...params);
+      return client.query(sql, values);
     })
       .then((res) => {
         this.busy = false;
@@ -66,11 +77,21 @@ export class Postgres {
       });
   }
 
+  /**
+   * @summary Устанавливает значение в таблице параметров по ключу
+   * @param {String} name - Ключ параметра
+   * @param {*} value - Значение, которое можно сериализовать в JSON
+   */
   set(name, value) {
     return this.query(`INSERT INTO settings (param, value) VALUES ('${name}', '${JSON.stringify(value)}')
       ON CONFLICT (param) DO UPDATE SET value = EXCLUDED.value;`);
   }
 
+  /**
+   * @summary Читает значение из таблицы параметров
+   * @param {String} name - Ключ параметра
+   * @return {Promise<*>}
+   */
   get(name) {
     return this.query(`select value from settings where param = '${name}';`)
       .then(({rows}) => rows.length ? rows[0].value : '');
