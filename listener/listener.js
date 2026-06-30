@@ -1,10 +1,10 @@
 
-import {formatDate} from './postgres.js';
+import {formatDate, reformatDate} from './postgres.js';
 import {Couchdb, nil} from './couchdb.js';
 
 const {DBUSER, DBPWD} = process.env;
 const interval = 6000;        // задержка между базами на старте и при ошибке
-const statInterval = 300000;  // статистика и перезапуск раз в 5 минут
+const statInterval = 120000;  // статистика и перезапуск раз в 5 минут
 const dateCache = {};             // даты документов
 const classNames = /^(doc\.calc_order|cat\.characteristics)/;
 const fakeFunc = () => null;
@@ -30,7 +30,7 @@ export class GlobalListener {
   }
 
   async listen() {
-    const {postgres, abonents} = this;
+    const {postgres, branches, abonents} = this;
     const items = await postgres.get('listen');
     for(const {year, abonent, skip} of items) {
       if(!skip) {
@@ -41,7 +41,7 @@ export class GlobalListener {
         const rows = await postgres.servers({year, abonent});
         for(const {addr} of rows) {
           if(!servers[addr]) {
-            servers[addr] = new ServerListener({year, abonent, postgres, addr});
+            servers[addr] = new ServerListener({year, abonent, postgres, branches, addr});
           }
         }
       }
@@ -68,10 +68,11 @@ export class GlobalListener {
  */
 class ServerListener {
 
-  constructor({year, abonent, postgres, addr}) {
+  constructor({year, abonent, postgres, branches, addr}) {
     this.year = year;
     this.abonent = abonent;
     this.postgres = postgres;
+    this.branches = branches;
     this.url = addr;
     this.root = new Couchdb(`${addr}/_all_dbs`, {
       auth: {username: DBUSER, password: DBPWD},
@@ -87,24 +88,50 @@ class ServerListener {
    * @summary Сохраняет в PG, текущую статистику
    */
   async stat() {
+    const {postgres} = this;
+    const aggregate = {
+      dbs: 0,
+      active: 0,
+      current: 0,
+      all: await postgres.get('stat:aggregate')?.all || 0,
+      speed: 0
+    };
     for(const [db] of this.feeds) {
-      await this.statDb(db);
+      const stat = await this.statDb(db);
+      aggregate.dbs++;
+      if(stat.current) {
+        aggregate.active++;
+        aggregate.current += stat.current;
+        aggregate.all += stat.current;
+        if(stat.speed) {
+          aggregate.speed += stat.speed;
+        }
+      }
     }
+    aggregate.moment = formatDate();
+    return this.postgres.set('stat:aggregate', aggregate);
   }
 
   async statDb(db) {
     const {feeds, postgres} = this;
     const stat = feeds.get(db);
     const newStat = await postgres.stat(db);
-    const current = stat.initStat.current + stat.docs;
-    if(current > newStat.current) {
-      const since = await postgres.since(db);
-      newStat.since = since?.substring(0, 30) || 'nil';
-      newStat.current = current;
-      newStat.all = stat.initStat.all + stat.docs;
+    if(stat.docs) {
+      const moment = Math.max(stat.moment, newStat.moment ? reformatDate(newStat.moment) : 0);
+      const delta = (new Date() - moment) / 1000;
+      newStat.current = stat.docs;
+      newStat.speed = (stat.docs / delta).toFixed(2);
+      newStat.all += stat.docs;
       delete newStat.error;
+      newStat.since = (await postgres.since(db))?.substring(0, 30) || 'nil';
+      await postgres.setStat(db, newStat);
+      stat.docs = 0;
+    }
+    else if(newStat.current) {
+      newStat.current = 0;
       await postgres.setStat(db, newStat);
     }
+    return newStat;
   }
 
   async statError(db, err) {
@@ -118,20 +145,15 @@ class ServerListener {
   }
 
   async listen() {
-    const {root, url, bases, year, abonent} = this;
-    const dbs = await root.info();
-    for(const name of dbs) {
-      if(name.startsWith(`wb_${abonent}`) && name.includes('_doc') && !bases[name]) {
-        const parts = name.split('_');
-        if(!parts[3] || /^\d+$/.test(parts[3])) {
-          const db = new Couchdb(`${url}/${name}`, {
-            auth: {username: DBUSER, password: DBPWD},
-            skip_setup: true,
-          });
-          db.def = {year, abonent: parseInt(parts[1]), branch: parts[3] ? parseInt(parts[3]) : 0};
-          bases[name] = db;
-        }
-      }
+    const {root, url, bases, year, branches, abonent} = this;
+    const dbs = branches.sort(await root.info(), abonent, bases);
+    for(const {name, branch} of dbs) {
+      const db = new Couchdb(`${url}/${name}`, {
+        auth: {username: DBUSER, password: DBPWD},
+        skip_setup: true,
+      });
+      db.def = {year, abonent, branch};
+      bases[name] = db;
     }
     setInterval(() => this.stat(), statInterval);
     for(const name in bases) {
@@ -179,7 +201,7 @@ class ServerListener {
             reject();
           });
         const feed = feeds.get(db) || {};
-        feeds.set(db, Object.assign(feed, {feed: changes, docs: 0, initStat, initInfo, moment: Date.now()}));
+        feeds.set(db, Object.assign(feed, {feed: changes, docs: 0, initStat, initInfo, moment: new Date()}));
       });
     }
   }

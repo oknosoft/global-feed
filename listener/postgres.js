@@ -15,6 +15,11 @@ export function formatDate(date) {
   return date.toISOString().substring(0, 19).replace(/-/g, '');
 }
 
+export function reformatDate(src) {
+  const str = `${src.substring(0,4)}-${src.substring(4,6)}-${src.substring(6)}`;
+  return new Date(str);
+}
+
 export class Postgres {
 
   constructor() {

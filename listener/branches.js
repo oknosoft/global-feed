@@ -7,8 +7,40 @@ class BranchesOrder {
     this.abonents = abonents;
   }
 
-  sort(names) {
+  /**
+   * @summary Сортирует базы в порядке от детей к родителю
+   * @param {Array.<String>} names
+   * @param {Number} abonent
+   * @param {Array.<Couchdb>} bases
+   */
+  sort(names, abonent, bases) {
+    const dbs = names.filter(name => {
+        if(name.startsWith(`wb_${abonent}`) && name.includes('_doc') && !bases[name]) {
+          const parts = name.split('_');
+          return !parts[3] || /^\d+$/.test(parts[3]);
+        }
+      })
+      .map(name => {
+        const root = name.endsWith('_doc');
+        const branch = root ? null : this.branch(abonent, name);
+        const order = root ? 1e6 : branch?.order || 0;
+        return {name, branch: branch?.id || 0, order};
+      });
+    return dbs.sort((a, b) => a.order - b.order);
+  }
 
+  /**
+   * Ищет отдел абонента по имени базы
+   * @param {Number} abonentId
+   * @param {String} name
+   */
+  branch(abonentId, name) {
+    const abonent = this.abonents.find(v => v.id === abonentId);
+    if(abonent) {
+      const index = name.lastIndexOf('_');
+      const suffix = name.substring(index + 1);
+      return abonent.branches.find(v => v.suffix === suffix);
+    }
   }
 
 }
