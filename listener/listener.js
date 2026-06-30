@@ -13,7 +13,7 @@ export function log(...args) {
   console.log(formatDate(), ...args);
 }
 
-function logError(...args) {
+export function logError(...args) {
   console.error(formatDate(), ...args);
 }
 

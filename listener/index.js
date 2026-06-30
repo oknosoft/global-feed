@@ -1,6 +1,6 @@
 
 import {Postgres} from './postgres.js';
-import {GlobalListener, log} from './listener.js';
+import {GlobalListener, log, logError} from './listener.js';
 import {branchesOrder} from './branches.js';
 
 // запускаем слушатель
@@ -14,12 +14,17 @@ setTimeout(async () => {
   // планируем перезапуск
   const reloadAt = new Date();
   reloadAt.setDate(reloadAt.getDate() + 1);
-  reloadAt.setHours(5, 0, 0);
+  reloadAt.setHours(3, 30, 0);
   //reloadAt.setHours(reloadAt.getHours() + 1, 0, 0);
   setTimeout(() => {
     if(new Date() >= reloadAt) {
-      listener.stopAll();
       log('daily restart');
+      try {
+        listener.stopAll();
+      }
+      catch (e) {
+        logError(e);
+      }
       process.exit(0);
     }
   }, 1200000);
