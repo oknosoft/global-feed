@@ -1,6 +1,11 @@
 
 import {Couchdb, nil} from './couchdb.js';
 
+/**
+ * @summary Сортировщик порядка обхода баз на сервере
+ * @desc В первую очередь, слушаем дочерние базы,
+ * затем - базы дилерских отделов и в самом конце - корневую
+ */
 class BranchesOrder {
 
   constructor(abonents) {
@@ -45,6 +50,11 @@ class BranchesOrder {
 
 }
 
+/**
+ * @summary Начальное заполнение сортировщика
+ * @desc Читает Абонентов и Отделы из базы MDM
+ * @return {Promise<BranchesOrder>}
+ */
 export async function branchesOrder() {
   const {DBUSER, DBPWD, COUCHLOCAL} = process.env;
   const db = new Couchdb(COUCHLOCAL, {auth: {username: DBUSER, password: DBPWD}});
@@ -86,30 +96,3 @@ export async function branchesOrder() {
   return new BranchesOrder(abonents);
 
 }
-const query = `
-ВЫБРАТЬ
-\tОтделы.Суффикс КАК Ссылка,
-\tСУММА(ВЫБОР
-\t\t\tКОГДА Дети.Ссылка ЕСТЬ NULL
-\t\t\t\tТОГДА 0
-\t\t\tИНАЧЕ 1
-\t\tКОНЕЦ) КАК Детей
-ИЗ
-\tСправочник.ИнтеграцияОтделыАбонентов КАК Отделы
-\t\tЛЕВОЕ СОЕДИНЕНИЕ Справочник.ИнтеграцияОтделыАбонентов КАК Дети
-\t\tПО (Дети.Родитель = Отделы.Ссылка)
-ГДЕ
-\tОтделы.Владелец = &Абонент
-
-СГРУППИРОВАТЬ ПО
-\tОтделы.Суффикс
-
-ИМЕЮЩИЕ
-\tСУММА(ВЫБОР
-\t\t\tКОГДА Дети.Ссылка ЕСТЬ NULL
-\t\t\t\tТОГДА 0
-\t\t\tИНАЧЕ 1
-\t\tКОНЕЦ) > 0
-
-УПОРЯДОЧИТЬ ПО
-\tДетей УБЫВ`;
