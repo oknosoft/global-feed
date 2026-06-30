@@ -4,7 +4,7 @@ import {Couchdb, nil} from './couchdb.js';
 
 const {DBUSER, DBPWD} = process.env;
 const interval = 6000;        // задержка между базами на старте и при ошибке
-const statInterval = 300000;  // статистика и перезапуск раз в 5 минут
+const statInterval = 60000;  // статистика и перезапуск раз в 5 минут
 const dateCache = {};             // даты документов
 const classNames = /^(doc\.calc_order|cat\.characteristics)/;
 const fakeFunc = () => null;
@@ -13,8 +13,11 @@ export function log(...args) {
   console.log(formatDate(), ...args);
 }
 
-export function logError(...args) {
-  console.error(formatDate(), ...args);
+export function logError(err, ...args) {
+  if(err instanceof Error && err.message === 'terminated') {
+    err = err.message;
+  }
+  console.error(formatDate(), err, ...args);
 }
 
 /**
@@ -221,11 +224,14 @@ class ServerListener {
             resolve();
           })
           .on('error', async (err) => {
-            logError(err);
+            logError(err, db.name);
             await this.statError(db, err);
             this.stopDb(db);
             clearTimeout(resolveTimer);
-            setTimeout(this.listenDb.bind(this, db), interval);
+            setTimeout(this.listenDb.bind(this, db), db.multiplier * interval);
+            if(db.multiplier < 20) {
+              db.multiplier *= 2;
+            }
             reject();
           });
         const feed = feeds.get(db) || {};
@@ -296,6 +302,7 @@ class ServerListener {
         }
       }
     }
+    db.multiplier = 1;
     await postgres.setSince(db, seq);
   }
 

@@ -75,6 +75,7 @@ export class Couchdb {
       Accept: 'application/json',
       Authorization: `Basic ${Buffer.from(auth.username + ':' + auth.password, 'utf8').toString('base64')}`,
     });
+    this.multiplier = 1;
   }
 
   fetch(path = '', opts) {
