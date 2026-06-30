@@ -71,6 +71,7 @@ export class GlobalListener {
         }
       }
     }
+    aggregate.speed = Math.round(aggregate.speed * 100) / 100;
     aggregate.moment = formatDate();
     await this.postgres.set(`stat:aggregate`, aggregate);
     return aggregate;
@@ -128,6 +129,7 @@ class ServerListener {
         aggregate.errors++;
       }
     }
+    aggregate.speed = Math.round(aggregate.speed * 100) / 100;
     aggregate.moment = formatDate();
     await this.postgres.set(key, aggregate);
     return aggregate;
