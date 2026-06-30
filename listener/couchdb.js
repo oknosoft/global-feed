@@ -4,6 +4,11 @@ import {sleepTimeout} from './postgres.js';
 
 export const nil = '00000000-0000-0000-0000-000000000000';
 
+/**
+ * @summary Аналог PouchDB.Changes в live-режиме
+ * @desc Слушает базу Couchdb, перезапускает при ошибке.
+ * Отличается от оригинала, асинхронным обработчиком событий
+ */
 class Subscriber {
 
   constructor(owner, opts) {
@@ -67,6 +72,10 @@ class Subscriber {
   }
 }
 
+/**
+ * @summary Аналог базы PouchDB
+ * @desc Предоставляет ограниченный и упрощенный интерфейс с нативным fetch()
+ */
 export class Couchdb {
 
   constructor(name, {auth}) {
