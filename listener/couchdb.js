@@ -25,7 +25,7 @@ class Subscriber {
       return;
     }
     const {since, owner: {name, headers}, allReaded, handlers} = this;
-    let url = `${name}/_changes?heartbeat=40000&style=all_docs&include_docs=true&limit=30`;
+    let url = `${name}/_changes?heartbeat=40000&style=all_docs&include_docs=true&limit=40`;
     if(allReaded) {
       url += `&feed=longpoll`;
     }
