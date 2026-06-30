@@ -44,19 +44,24 @@ class Subscriber {
     try {
       this.controller = new AbortController();
       const { signal } = this.controller;
-      const {last_seq, results, pending} = await fetch(url, {headers, signal})
-        .then(res => res.json());
+      const res = await fetch(url, {headers, signal}).then(res => res.json());
+      const {last_seq, results, pending} = res;
       const {change} = handlers;
-      for(const item of results) {
-        await change(item);
-        this.since = item.seq;
+      if(Array.isArray(results)) {
+        for(const item of results) {
+          await change(item);
+          this.since = item.seq;
+        }
+        if(!pending && !allReaded) {
+          this.allReaded = true;
+          handlers.allReaded?.();
+        }
+        if(!this.isCancelled) {
+          setTimeout(this.fetch, sleepTimeout);
+        }
       }
-      if(!pending && !allReaded) {
-        this.allReaded = true;
-        handlers.allReaded?.();
-      }
-      if(!this.isCancelled) {
-        setTimeout(this.fetch, sleepTimeout);
+      else if(!this.isCancelled) {
+        this.handlers.error(res);
       }
     }
     catch (e) {
