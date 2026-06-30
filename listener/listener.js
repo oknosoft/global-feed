@@ -116,19 +116,26 @@ class ServerListener {
     const {feeds, postgres} = this;
     const stat = feeds.get(db);
     const newStat = await postgres.stat(db);
-    if(stat.docs) {
+    let save = stat.docs;
+    if(save) {
       const moment = Math.max(stat.moment, newStat.moment ? reformatDate(newStat.moment) : 0);
       const delta = (new Date() - moment) / 1000;
-      newStat.current = stat.docs;
-      newStat.speed = (stat.docs / delta).toFixed(2);
-      newStat.all += stat.docs;
+      newStat.current = save;
+      newStat.speed = Math.round(save / delta, 3);
+      newStat.all += save;
       delete newStat.error;
       newStat.since = (await postgres.since(db))?.substring(0, 30) || 'nil';
-      await postgres.setStat(db, newStat);
       stat.docs = 0;
     }
     else if(newStat.current) {
       newStat.current = 0;
+      save = true;
+    }
+    if(newStat.error && !stat.feed.isCancelled) {
+      delete newStat.error;
+      save = true;
+    }
+    if(save) {
       await postgres.setStat(db, newStat);
     }
     return newStat;
