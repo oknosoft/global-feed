@@ -1,5 +1,6 @@
 
 import {Client} from 'pg';
+//import os from 'node:os';
 
 export const sleepTimeout = 6;
 export function sleep() {
@@ -12,12 +13,16 @@ export function formatDate(date) {
   if(!date) {
     date = new Date();
   }
-  return date.toISOString().substring(0, 19).replace(/-/g, '');
+  const diff = -date.getTimezoneOffset()/60;
+  date.setHours(date.getHours() + diff);
+  return date.toISOString().substring(0, 19);
 }
 
 export function reformatDate(src) {
-  const str = `${src.substring(0,4)}-${src.substring(4,6)}-${src.substring(6)}`;
-  return new Date(str);
+  if(!src.includes('-')) {
+    src = `${src.substring(0,4)}-${src.substring(4,6)}-${src.substring(6)}`;
+  }
+  return new Date(src);
 }
 
 export class Postgres {
