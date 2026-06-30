@@ -4,7 +4,7 @@ import {Couchdb, nil} from './couchdb.js';
 
 const {DBUSER, DBPWD} = process.env;
 const interval = 6000;        // задержка между базами на старте и при ошибке
-const statInterval = 120000;  // статистика и перезапуск раз в 5 минут
+const statInterval = 300000;  // статистика и перезапуск раз в 5 минут
 const dateCache = {};             // даты документов
 const classNames = /^(doc\.calc_order|cat\.characteristics)/;
 const fakeFunc = () => null;
