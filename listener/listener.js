@@ -4,7 +4,7 @@ import {Couchdb, nil} from './couchdb.js';
 
 const {DBUSER, DBPWD} = process.env;
 const interval = 6000;        // задержка между базами на старте и при ошибке
-const statInterval = 300000;  // статистика и перезапуск раз в 5 минут
+const statInterval = 120000;  // статистика и перезапуск раз в 5 минут
 const dateCache = {};             // даты документов
 const classNames = /^(doc\.calc_order|cat\.characteristics)/;
 const fakeFunc = () => null;
@@ -27,6 +27,7 @@ export class GlobalListener {
     this.postgres = postgres;
     this.branches = branches;
     this.abonents = new Map();
+    setInterval(this.stat.bind(this), statInterval);
   }
 
   async listen() {
@@ -60,6 +61,21 @@ export class GlobalListener {
       }
     }
   }
+
+  async stat() {
+    const aggregate = {dbs: 0, active: 0, current: 0, all: 0, speed: 0, errors: 0};
+    for(const [abonent, servers] of this.abonents) {
+      for(const addr in servers) {
+        const {moment, ...other} = await servers[addr].stat();
+        for(const fld in other) {
+          aggregate[fld] += other[fld];
+        }
+      }
+    }
+    aggregate.moment = formatDate();
+    await this.postgres.set(`stat:aggregate`, aggregate);
+    return aggregate;
+  }
 }
 
 /**
@@ -88,13 +104,15 @@ class ServerListener {
    * @summary Сохраняет в PG, текущую статистику
    */
   async stat() {
-    const {postgres} = this;
+    const {postgres, url} = this;
+    const key = `stat:${url}`;
     const aggregate = {
       dbs: 0,
       active: 0,
       current: 0,
-      all: await postgres.get('stat:aggregate')?.all || 0,
-      speed: 0
+      all: await postgres.get(key)?.all || 0,
+      speed: 0,
+      errors: 0,
     };
     for(const [db] of this.feeds) {
       const stat = await this.statDb(db);
@@ -107,9 +125,13 @@ class ServerListener {
           aggregate.speed += stat.speed;
         }
       }
+      if(stat.error) {
+        aggregate.errors++;
+      }
     }
     aggregate.moment = formatDate();
-    return this.postgres.set('stat:aggregate', aggregate);
+    await this.postgres.set(key, aggregate);
+    return aggregate;
   }
 
   async statDb(db) {
@@ -162,7 +184,6 @@ class ServerListener {
       db.def = {year, abonent, branch};
       bases[name] = db;
     }
-    setInterval(() => this.stat(), statInterval);
     for(const name in bases) {
       await this.listenDb(bases[name]);
     }
