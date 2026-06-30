@@ -107,8 +107,8 @@ class ServerListener {
    * @summary Сохраняет в PG, текущую статистику
    */
   async stat() {
-    const {postgres, url} = this;
-    const key = `stat:${url}`;
+    const {postgres, url, abonent} = this;
+    const key = `stat:${url}:${abonent}`;
     const aggregate = {
       dbs: 0,
       active: 0,
