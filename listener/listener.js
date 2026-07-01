@@ -186,7 +186,10 @@ class ServerListener {
       bases[name] = db;
     }
     for(const name in bases) {
-      await this.listenDb(bases[name]);
+      try {
+        await this.listenDb(bases[name]);
+      }
+      catch (e) {}
     }
   }
 
@@ -207,7 +210,12 @@ class ServerListener {
         if(timeout > 15 * 60000) {
           timeout = 15 * 60000;
         }
-        const resolveTimer = setTimeout(resolve, timeout);
+        function ready() {
+          ready.wasCalled = true;
+          clearTimeout(resolveTimer);
+          resolve();
+        }
+        const resolveTimer = setTimeout(ready, timeout);
 
         const changes = db.changes({
           since,
@@ -217,17 +225,16 @@ class ServerListener {
           style: 'all_docs',
         })
           .on('change', (change) => this.reflect(db, change))
-          .on('allReaded', () => {
-            clearTimeout(resolveTimer);
-            resolve();
-          })
+          .on('allReaded', ready)
           .on('error', async (err) => {
-            const message = err.message || err;
-            logError(db.name, message === 'terminated' ? message : err);
+            if(err.message !== 'terminated') {
+              logError(db.name, err);
+            }
             await this.statError(db, err);
             this.stopDb(db);
             clearTimeout(resolveTimer);
-            setTimeout(this.listenDb.bind(this, db), db.multiplier * interval);
+            const timeout = (db.multiplier + Math.random()) * interval;
+            setTimeout(this.listenDb.bind(this, db), timeout);
             if(db.multiplier < 20) {
               db.multiplier *= 2;
             }

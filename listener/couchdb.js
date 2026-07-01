@@ -14,7 +14,6 @@ class Subscriber {
   constructor(owner, opts) {
     this.owner = owner;
     this.since = opts.since;
-    this.allReaded = false;
     this.handlers = {};
     this.fetch = this.fetch.bind(this);
     Promise.resolve().then(this.fetch);
@@ -29,7 +28,7 @@ class Subscriber {
     if(this.isCancelled) {
       return;
     }
-    const {since, owner: {name, headers}, allReaded, handlers} = this;
+    const {since, owner: {name, headers, allReaded}, handlers} = this;
     let url = `${name}/_changes?heartbeat=40000&style=all_docs&include_docs=true&limit=40`;
     if(allReaded) {
       url += `&feed=longpoll`;
@@ -52,9 +51,13 @@ class Subscriber {
           await change(item);
           this.since = item.seq;
         }
-        if(!pending && !allReaded) {
-          this.allReaded = true;
-          handlers.allReaded?.();
+        if(!pending) {
+          if(!allReaded) {
+            this.owner.allReaded = true;
+          }
+          if(!handlers.allReaded.wasCalled) {
+            handlers.allReaded();
+          }
         }
         if(!this.isCancelled) {
           setTimeout(this.fetch, sleepTimeout);
@@ -90,6 +93,7 @@ export class Couchdb {
       Authorization: `Basic ${Buffer.from(auth.username + ':' + auth.password, 'utf8').toString('base64')}`,
     });
     this.multiplier = 1;
+    this.allReaded = false;
   }
 
   fetch(path = '', opts) {
