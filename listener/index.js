@@ -27,10 +27,7 @@ setTimeout(async () => {
 
   // лог необработанных ошибок
   process.on('unhandledRejection', (error, promise) => {
-    if(error && error?.status !== 404) {
-      logError(error);
-    }
-    else {
+    if(error && error.status !== 404) {
       logError(`unhandledRejection`, error, promise);
     }
   });
