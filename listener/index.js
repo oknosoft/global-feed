@@ -1,6 +1,6 @@
 
 import {Postgres, formatDate} from './postgres.js';
-import {GlobalListener, log} from './listener.js';
+import {GlobalListener, log, logError} from './listener.js';
 import {branchesOrder} from './branches.js';
 
 // запускаем слушатель
@@ -24,5 +24,16 @@ setTimeout(async () => {
       process.exit(0);
     }
   }, 1200000);
+
+  // лог необработанных ошибок
+  process.on('unhandledRejection', (error, promise) => {
+    if(error && error?.status !== 404) {
+      logError(error);
+    }
+    else {
+      logError(`unhandledRejection`, error, promise);
+    }
+  });
+
 }, 4000);
 

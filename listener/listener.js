@@ -238,7 +238,7 @@ class ServerListener {
             if(db.multiplier < 20) {
               db.multiplier *= 2;
             }
-            reject();
+            reject(err);
           });
         const feed = feeds.get(db) || {};
         feeds.set(db, Object.assign(feed, {feed: changes, docs: 0, initStat, initInfo, moment: new Date()}));
