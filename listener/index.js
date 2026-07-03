@@ -16,7 +16,7 @@ setTimeout(async () => {
   const reloadAt = new Date();
   reloadAt.setDate(reloadAt.getDate() + 1);
   reloadAt.setHours(3, 30, 0);
-  log(`reload planed at ${formatDate(reloadAt)}`);
+  log(`reload planed at ${formatDate(new Date(reloadAt))}`);
   setInterval(() => {
     if(new Date() >= reloadAt) {
       log('daily restart');

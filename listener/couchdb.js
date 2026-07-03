@@ -19,11 +19,22 @@ class Subscriber {
     Promise.resolve().then(this.fetch);
   }
 
+  /**
+   * @summary Подключает обработчик события
+   * @param {String} event
+   * @param {Function} handler
+   * @return {Subscriber}
+   */
   on(event, handler) {
     this.handlers[event] = handler;
     return this;
   }
 
+  /**
+   * @summary Запрос к фиду Couchdb
+   * @desc Перезапускается на вершине и ошибках
+   * @return {Promise<void>}
+   */
   async fetch() {
     if(this.isCancelled) {
       return;
@@ -56,7 +67,7 @@ class Subscriber {
             this.owner.allReaded = true;
           }
           if(!handlers.allReaded.wasCalled) {
-            handlers.allReaded();
+            await handlers.allReaded?.();
           }
         }
         if(!this.isCancelled) {
@@ -64,7 +75,7 @@ class Subscriber {
         }
       }
       else if(!this.isCancelled) {
-        this.handlers.error(res);
+        this.handlers.error?.(res);
       }
     }
     catch (e) {
@@ -74,6 +85,9 @@ class Subscriber {
     }
   }
 
+  /**
+   * @summary Останавливает слушателя
+   */
   cancel() {
     this.controller?.abort();
     this.isCancelled = true;
@@ -96,23 +110,46 @@ export class Couchdb {
     this.allReaded = false;
   }
 
+  /**
+   * @summary Запрос к Couchdb
+   * @param {String} path
+   * @param {Object} [opts]
+   * @return {Promise<any>}
+   */
   fetch(path = '', opts) {
     const {name, headers} = this;
     return fetch(name + path, {headers, ...opts})
       .then(res => res.json());
   }
 
+  /**
+   * @summary Аналог info() PouchDB
+   * @return {Promise<*>}
+   */
   info() {
     return this.fetch();
   }
 
+  /**
+   * @summary Создаёт слушателя изменений текущей базы
+   * @param opts
+   * @return {Subscriber}
+   */
   changes(opts) {
     return new Subscriber(this, opts);
   }
 
-  get(id) {
+  /**
+   * @summary Аналог get() PouchDB
+   * @return {Promise<*>}
+   */
+  get(id, rev) {
     const {name, headers} = this;
-    return fetch(`${name}/${id}`, {headers})
+    let path = `${name}/${id}`;
+    if(rev) {
+      path += `?rev=${rev}`;
+    }
+    return fetch(path, {headers})
       .then(res => res.json());
   }
 }
