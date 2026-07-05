@@ -26,9 +26,9 @@ setTimeout(async () => {
   }, 1200000);
 
   // лог необработанных ошибок
-  process.on('unhandledRejection', (error) => {
-    if(error && error.status !== 404) {
-      logError(`unhandledRejection`, err.cause?.code === 'ECONNREFUSED' ? `${err.cause.code} ${err.cause.address}` :  error);
+  process.on('unhandledRejection', (err) => {
+    if(err && err.status !== 404) {
+      logError(`unhandledRejection`, err.cause?.code === 'ECONNREFUSED' ? `${err.cause.code} ${err.cause.address}` :  err);
     }
   });
 
