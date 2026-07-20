@@ -2,6 +2,7 @@
 import {Postgres, formatDate} from './postgres.js';
 import {GlobalListener, log, logError} from './listener.js';
 import {branchesOrder} from './branches.js';
+import {currentServers} from './servers.js';
 
 // запускаем слушатель
 setTimeout(async () => {
@@ -9,6 +10,7 @@ setTimeout(async () => {
   log(`start`);
   const postgres = new Postgres();
   const branches = await branchesOrder();
+  await currentServers(postgres, branches);
   const listener = new GlobalListener(postgres, branches);
   listener.listen();
 
