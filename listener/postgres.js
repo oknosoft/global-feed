@@ -138,6 +138,11 @@ export class Postgres {
     return tmp.rows?.length ? tmp.rows[0].rev : '';
   }
 
+  lastSeq() {
+    return this.query('SELECT seq FROM feed ORDER BY seq desc limit 1')
+      .then(({rows}) => rows[0].seq);
+  }
+
   async docRow({type, ref, rev, strict}) {
     if(!rev) {
       return this.lastRev({type, ref, row: true});

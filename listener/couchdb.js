@@ -103,6 +103,7 @@ export class Couchdb {
   constructor(name, {auth}) {
     this.name = name;
     this.headers = new Headers({
+      'Content-Type': 'application/json',
       Accept: 'application/json',
       Authorization: `Basic ${Buffer.from(auth.username + ':' + auth.password, 'utf8').toString('base64')}`,
     });
@@ -150,6 +151,16 @@ export class Couchdb {
       path += `?rev=${rev}`;
     }
     return fetch(path, {headers})
+      .then(res => res.json());
+  }
+
+  /**
+   * @summary Аналог bulk_get() PouchDB
+   * @return {Promise<*>}
+   */
+  bulk_get(docs) {
+    const {name, headers} = this;
+    return fetch(`${name}/_bulk_get`, {method: 'POST', headers, body: JSON.stringify({docs})})
       .then(res => res.json());
   }
 }
