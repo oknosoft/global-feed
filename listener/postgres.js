@@ -3,9 +3,9 @@ import {Client} from 'pg';
 //import os from 'node:os';
 
 export const sleepTimeout = 6;
-export function sleep() {
+export function sleep(timeout) {
   return new Promise((resolve) => {
-    setTimeout(resolve, sleepTimeout);
+    setTimeout(resolve, timeout || sleepTimeout);
   });
 }
 
@@ -103,10 +103,6 @@ export class Postgres {
     return rows;
   }
 
-  async setServers({year, abonent, branch, addr}) {
-
-  }
-
   async since(db){
     const {name} = db;
     return (await this.get(`since:${name}`)) || undefined;
@@ -133,11 +129,23 @@ export class Postgres {
     return {ref: tmp.rows[0]?.exists, rev: false};
   }
 
-  async lastRev({type, ref}) {
+  async lastRev({type, ref, row}) {
     const tmp = await this.query(
-      `SELECT rev FROM public.feed where type=$1 and ref=$2 limit 1);`,
-      [type, ref]);
+      `SELECT * FROM public.feed where type=$1 and ref=$2 order by type, ref, rev desc limit 1;`, [type, ref]);
+    if(row) {
+      return tmp.rows?.length ? tmp.rows[0] : null;
+    }
     return tmp.rows?.length ? tmp.rows[0].rev : '';
+  }
+
+  async docRow({type, ref, rev, strict}) {
+    if(!rev) {
+      return this.lastRev({type, ref, row: true});
+    }
+    const tmp = await this.query(
+      `SELECT * FROM public.feed where type=$1 and ref=$2 and rev=$3;`,[type, ref, rev]);
+    return tmp.rows?.length ? tmp.rows[0] :
+      (strict ? null : this.lastRev({type, ref, row: true}));
   }
 
   append({year, abonent, branch, type, ref, rev, deleted, partner, department, date}) {

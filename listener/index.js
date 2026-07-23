@@ -1,8 +1,9 @@
 
-import {Postgres, formatDate} from './postgres.js';
+import {Postgres} from './postgres.js';
 import {GlobalListener, log, logError} from './listener.js';
 import {branchesOrder} from './branches.js';
 import {currentServers} from './servers.js';
+import {reload} from './reload.js';
 
 // запускаем слушатель
 setTimeout(async () => {
@@ -15,17 +16,7 @@ setTimeout(async () => {
   listener.listen();
 
   // планируем перезапуск по ночам
-  const reloadAt = new Date();
-  reloadAt.setDate(reloadAt.getDate() + 1);
-  reloadAt.setHours(3, 30, 0);
-  log(`reload planed at ${formatDate(new Date(reloadAt))}`);
-  setInterval(() => {
-    if(new Date() >= reloadAt) {
-      log('daily restart');
-      listener.stopAll();
-      process.exit(0);
-    }
-  }, 1200000);
+  reload(3, 3, log, listener);
 
   // лог необработанных ошибок
   process.on('unhandledRejection', (err) => {
@@ -34,5 +25,5 @@ setTimeout(async () => {
     }
   });
 
-}, 4000);
+}, 3000);
 

@@ -26,12 +26,14 @@ export async function currentServers(postgres, branches) {
   }
   for(const abonent of branches.abonents) {
     const server = servers[abonent.server];
-    await postgres.query(sql, [year, abonent.id, 0, addr(server)]);
-    for(const branch of abonent.branches) {
-      if(/^\d{4}$/.test(branch.suffix)) {
-        const server = servers[branch.server || branch.parent.server || abonent.server];
-        if(server) {
-          await postgres.query(sql, [year, abonent.id, branch.id, addr(server)]);
+    if(server) {
+      await postgres.query(sql, [year, abonent.id, 0, addr(server)]);
+      for(const branch of abonent.branches) {
+        if(/^\d{4}$/.test(branch.suffix)) {
+          const server = servers[branch.server || branch.parent.server || abonent.server];
+          if(server) {
+            await postgres.query(sql, [year, abonent.id, branch.id, addr(server)]);
+          }
         }
       }
     }
