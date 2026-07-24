@@ -243,6 +243,14 @@ export class CouchdbImitator {
     res.end(`["feed"]`);
   }
 
+  changed(res) {
+    const key = res.socket.remoteAddress;
+    res.end();
+    if(key === '::1' || key.includes('127.0.0.1')) {
+
+    }
+  }
+
   handler(req, res) {
     const {url, method} = req;
     if(url.startsWith('/feed/_changes')) {

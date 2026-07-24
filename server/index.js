@@ -3,6 +3,7 @@ import { RateLimiterMemory } from 'rate-limiter-flexible';
 import http from 'node:http';
 import {sleep} from '../listener/postgres.js';
 import {log, logError} from '../listener/listener.js';
+import {port} from '../listener/emitter.js';
 import {CouchdbImitator, contentType} from './couchdb.js';
 import {took} from './stat.js';
 import {reload} from '../listener/reload.js';
@@ -13,7 +14,6 @@ const opts = {
   duration: 3, // в течение трёх секунд
 };
 
-const port = process.env.PORT || 3099;
 
 // запускаем сервер
 setTimeout(async () => {
@@ -32,6 +32,10 @@ setTimeout(async () => {
     const {remoteAddress} = res.socket;
     const {headers} = req;
     let key = headers['x-forwarded-for'] || headers['x-real-ip'] || remoteAddress;
+    // запросы listener-а, выполняем без промедления
+    if(key === '::1' || key.includes('127.0.0.1')) {
+      return imitator.changed(res);
+    }
     ipLimiter.consume(key, 1)
       .catch((limiterRes) => {
         if(limiterRes instanceof Error || limiterRes.consumedPoints > 6) {

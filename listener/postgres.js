@@ -36,7 +36,7 @@ export function reformatDate(str) {
  */
 export class Postgres {
 
-  constructor() {
+  constructor(withEmitter) {
     const {env} = process;
     this.client = new Client({
       user: env.PGUSER,
@@ -45,6 +45,12 @@ export class Postgres {
       database: 'feed',
     });
     this.busy = false;
+
+    if(withEmitter) {
+      import('./emitter.js').then(({Emitter}) => {
+        this.emitter = new Emitter();
+      });
+    }
   }
 
   /**
@@ -110,7 +116,8 @@ export class Postgres {
 
   async setSince(db, seq){
     const {name} = db;
-    return await this.set(`since:${name}`, seq);
+    await this.set(`since:${name}`, seq);
+    this.emitter.notify();
   }
 
   async exists({type, ref, rev}, strict) {

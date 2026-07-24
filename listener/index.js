@@ -9,7 +9,7 @@ import {reload} from './reload.js';
 setTimeout(async () => {
 
   log(`start`);
-  const postgres = new Postgres();
+  const postgres = new Postgres(true);
   const branches = await branchesOrder();
   await currentServers(postgres, branches);
   const listener = new GlobalListener(postgres, branches);
