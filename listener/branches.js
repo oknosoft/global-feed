@@ -8,8 +8,17 @@ import {Couchdb, nil} from './couchdb.js';
  */
 class BranchesOrder {
 
+  #abonents = null;
+  #byRef = {};
+
   constructor(abonents) {
-    this.abonents = abonents;
+    this.#abonents = abonents;
+    for(const abonent of abonents) {
+      this.#byRef[abonent.ref] = abonent;
+      for(const branch of abonent.branches) {
+        this.#byRef[branch.ref] = branch;
+      }
+    }
   }
 
   /**
@@ -40,7 +49,7 @@ class BranchesOrder {
    * @param {String} name
    */
   branch(abonentId, name) {
-    const abonent = this.abonents.find(v => v.id === abonentId);
+    const abonent = this.#abonents.find(v => v.id === abonentId);
     if(abonent) {
       const index = name.lastIndexOf('_');
       const suffix = name.substring(index + 1);
@@ -53,12 +62,7 @@ class BranchesOrder {
    * @param {String} ref
    */
   byRef(ref) {
-    if(ref === nil) {
-      return null;
-    }
-    for(const abonent of this.abonents) {
-
-    }
+    return this.#byRef[ref] || null;
   }
 
 }
@@ -80,10 +84,22 @@ export async function branchesOrder() {
 
   res = await db.fetch(`/wb_${ZONE}_ram/_all_docs?start_key="cat.branches|"&end_key="cat.branches|z"&include_docs=true`);
   const branches = res.rows.map(({doc}) => {
-    const {_id, suffix, owner, parent, name, server} = doc;
+    const {_id, suffix, owner, parent, name, server, organizations, partners, divisions} = doc;
     const ref = _id.substring(13);
     const abonent = abonents.find(v => v.ref === owner);
-    const branch = {ref, id: parseInt(suffix), suffix, owner: abonent, parent, name, server, children: []};
+    const branch = {
+      ref,
+      id: parseInt(suffix),
+      suffix,
+      owner: abonent,
+      parent,
+      name,
+      server,
+      children: [],
+      organizations,
+      partners,
+      divisions,
+    };
     abonent?.branches.push(branch);
     return branch;
   });

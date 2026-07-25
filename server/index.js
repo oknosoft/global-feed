@@ -54,7 +54,15 @@ setTimeout(async () => {
         }
         return sleep(limiterRes.msBeforeNext).then(() => limiterRes);
       })
-      .then((limiter) => limiter instanceof Error ? null : imitator.handler(req, res))
+      .then(async (limiter) => {
+        if(limiter instanceof Error) {
+          return null;
+        }
+        const user = await users.authorize(req, res);
+        if(user) {
+          imitator.handler(req, res);
+        }
+      })
       .catch((err) => {
         const status = err.status || 500;
         res.writeHead(status, {...contentType, 'X-Duration': res.took()});
