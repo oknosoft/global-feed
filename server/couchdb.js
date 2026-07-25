@@ -1,6 +1,7 @@
 
 import querystring from 'node:querystring';
 import {nil} from '../listener/couchdb.js';
+import {LongPoller} from './longpoll.js';
 
 export const contentType = {'Content-Type': 'application/json; charset=utf-8'};
 const classNames = ['cat.characteristics', 'doc.calc_order'];
@@ -36,10 +37,27 @@ function err405(method, message) {
   throw err;
 }
 
+function getBody(req) {
+  return new Promise((resolve, reject) => {
+    let data = '';
+    req.on('data', (chunk) => data += chunk);
+    req.on('end', () => {
+      if(data.length > 0 && data.charCodeAt(0) == 65279) {
+        data = data.substring(1);
+      }
+      resolve(JSON.parse(data));
+    });
+    req.on('error', reject);
+  });
+}
+
 export class CouchdbImitator {
 
   constructor(postgres) {
     this.postgres = postgres;
+
+    // текущие ожидатели long pool-а
+    this.listeners = new Set();
   }
 
   async getDoc({type, ref, rev}) {
@@ -91,6 +109,64 @@ export class CouchdbImitator {
     err404(pathname);
   }
 
+  async changesBody({since, limit, include_docs}) {
+    const {rows} = await this.postgres
+      .query('SELECT * FROM feed where seq > $1 ORDER BY seq LIMIT $2', [since, limit]);
+
+    const last = rows[rows.length - 1];
+    const body = {last_seq: last?.seq || since, pending: rows.length === limit ? 1e5 : 0};
+
+    if(include_docs) {
+      // сгруппируем по серверу
+      const servers = new Map();
+      for(const row of rows) {
+        const {direct} = await this.postgres.servers(row);
+        if(!servers.has(direct)) {
+          servers.set(direct, []);
+        }
+        servers.get(direct).push(row);
+      }
+      for(const [server, rows] of servers) {
+        const {results} = await server.bulk_get(rows.map(({type, ref, rev}) =>
+          ({id: `${type}|${ref}`, rev})));
+        rows.forEach((row, ind) => {
+          const {ok, error} = results[ind].docs[0];
+          row.doc = ok || error;
+        });
+      }
+    }
+
+    body.results = rows.map(({rev, type, ref, seq, deleted, year, abonent, branch, doc}) => {
+      const change = {
+        changes: [{rev}],
+        id: `${type}|${ref}`,
+        seq,
+        origin: {year, abonent, branch},
+      };
+      if(deleted) {
+        change.deleted = true;
+      }
+      if(doc) {
+        change.doc = doc;
+      }
+      return change;
+    });
+
+    return body;
+  }
+
+  /**
+   * @summary Компонует селектор из тела запроса и прав текущего пользователя
+   * @param req
+   * @param filter
+   * @return {Promise<void>}
+   */
+  async changesSelector(req, filter) {
+    const {selector} = filter === 'selector' ? getBody(req) : {selector: {}};
+    const {user} = req;
+    return selector;
+  }
+
   async changes(req, res) {
     const {url, method, headers} = req;
     let {
@@ -124,6 +200,9 @@ export class CouchdbImitator {
     if(since === 'now') {
       since = await this.postgres.lastSeq();
     }
+    else if(!since) {
+      since = nil;
+    }
 
     if(typeof limit === 'string') {
       limit = parseInt(limit);
@@ -137,6 +216,9 @@ export class CouchdbImitator {
     }
     else if(typeof heartbeat === 'string') {
       heartbeat = parseInt(heartbeat);
+    }
+    if(heartbeat < 10000) {
+      heartbeat = 10000;
     }
 
     if(include_docs === 'true') {
@@ -154,50 +236,26 @@ export class CouchdbImitator {
       attachments = false;
     }
 
-    const {rows} = await this.postgres
-      .query('SELECT * FROM feed where seq > $1 ORDER BY seq LIMIT $2', [since || nil, limit]);
+    const selector = await this.changesSelector(req, filter);
+    const body = await this.changesBody({since, limit, include_docs, attachments, selector});
 
-    const last = rows[rows.length - 1];
-    const body = {last_seq: last.seq, pending: rows.length === limit ? 1e5 : 0};
-
-    if(include_docs) {
-      // сгруппируем по серверу
-      const servers = new Map();
-      for(const row of rows) {
-        const {direct} = await this.postgres.servers(row);
-        if(!servers.has(direct)) {
-          servers.set(direct, []);
-        }
-        servers.get(direct).push(row);
-      }
-      for(const [server, rows] of servers) {
-        const {results} = await server.bulk_get(rows.map(({type, ref, rev}) =>
-          ({id: `${type}|${ref}`, rev})));
-        rows.forEach((row, ind) => {
-          const {ok, error} = results[ind].docs[0];
-          row.doc = ok || error;
-        });
-      }
+    if (!body.results.length && feed === 'longpoll') {
+      res.writeHead(200, contentType);
+      this.listeners.add(
+        new LongPoller({owner: this, res, since, limit, include_docs, attachments, selector, heartbeat})
+      );
     }
+    else {
+      res.writeHead(200, {...contentType, 'X-Duration': res.took()});
+      res.end(JSON.stringify(body));
+    }
+  }
 
-    body.results = rows.map(({rev, type, ref, seq, deleted, doc}) => {
-      const change = {
-        changes: [{rev}],
-        id: `${type}|${ref}`,
-        seq,
-      };
-      if(deleted) {
-        change.deleted = true;
-      }
-      if(doc) {
-        change.doc = doc;
-      }
-      return change;
-    });
-
-    res.writeHead(200, {...contentType, 'X-Duration': res.took()});
-    return res.end(JSON.stringify(body));
-
+  async changed(res) {
+    res.end();
+    for(const listener of this.listeners) {
+      await listener.changed();
+    }
   }
 
   async info(res) {
@@ -241,14 +299,6 @@ export class CouchdbImitator {
   all_dbs(res) {
     res.writeHead(200, {...contentType, 'X-Duration': res.took()});
     res.end(`["feed"]`);
-  }
-
-  changed(res) {
-    const key = res.socket.remoteAddress;
-    res.end();
-    if(key === '::1' || key.includes('127.0.0.1')) {
-
-    }
   }
 
   handler(req, res) {

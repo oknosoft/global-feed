@@ -33,7 +33,7 @@ setTimeout(async () => {
     const {headers} = req;
     let key = headers['x-forwarded-for'] || headers['x-real-ip'] || remoteAddress;
     // запросы listener-а, выполняем без промедления
-    if(key === '::1' || key.includes('127.0.0.1')) {
+    if((key === '::1' || key.includes('127.0.0.1')) && req.url.startsWith('/changed')) {
       return imitator.changed(res);
     }
     ipLimiter.consume(key, 1)
