@@ -6,12 +6,13 @@ import {log, logError} from '../listener/listener.js';
 import {port} from '../listener/emitter.js';
 import {CouchdbImitator, contentType} from './couchdb.js';
 import {took} from './stat.js';
+import {loadUsers} from './users.js';
 import {reload} from '../listener/reload.js';
 import {PostgresClient} from './postgres.js';
 
 const opts = {
   points: 10, // разрешаем 10 запросов
-  duration: 3, // в течение трёх секунд
+  duration: 2, // в течение двух секунд
 };
 
 
@@ -22,6 +23,7 @@ setTimeout(async () => {
   await postgres.init();
   log(`postgres initiated`);
 
+  const users = await loadUsers();
   const imitator = new CouchdbImitator(postgres);
 
   const ipLimiter = new RateLimiterMemory(opts);
@@ -38,7 +40,7 @@ setTimeout(async () => {
     }
     ipLimiter.consume(key, 1)
       .catch((limiterRes) => {
-        if(limiterRes instanceof Error || limiterRes.consumedPoints > 6) {
+        if(limiterRes instanceof Error || limiterRes.consumedPoints > 7) {
           const err = new Error('Too many requests');
           res.writeHead(429, {
             "Retry-After": limiterRes.msBeforeNext / 1000,

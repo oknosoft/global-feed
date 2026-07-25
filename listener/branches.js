@@ -48,6 +48,19 @@ class BranchesOrder {
     }
   }
 
+  /**
+   * Ищет отдел по идентификатору
+   * @param {String} ref
+   */
+  byRef(ref) {
+    if(ref === nil) {
+      return null;
+    }
+    for(const abonent of this.abonents) {
+
+    }
+  }
+
 }
 
 /**
@@ -56,7 +69,7 @@ class BranchesOrder {
  * @return {Promise<BranchesOrder>}
  */
 export async function branchesOrder() {
-  const {DBUSER, DBPWD, COUCHLOCAL} = process.env;
+  const {DBUSER, DBPWD, COUCHLOCAL, ZONE = 10} = process.env;
   const db = new Couchdb(COUCHLOCAL, {auth: {username: DBUSER, password: DBPWD}});
   let res = await db.fetch('/wb_meta/_all_docs?start_key="cat.abonents|"&end_key="cat.abonents|z"&include_docs=true');
   const abonents = res.rows.map(({doc}) => {
@@ -65,7 +78,7 @@ export async function branchesOrder() {
     return {ref, id, name, server, area, branches: []};
   }).filter(v => !v.area);
 
-  res = await db.fetch('/wb_10_ram/_all_docs?start_key="cat.branches|"&end_key="cat.branches|z"&include_docs=true');
+  res = await db.fetch(`/wb_${ZONE}_ram/_all_docs?start_key="cat.branches|"&end_key="cat.branches|z"&include_docs=true`);
   const branches = res.rows.map(({doc}) => {
     const {_id, suffix, owner, parent, name, server} = doc;
     const ref = _id.substring(13);
