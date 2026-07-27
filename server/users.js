@@ -67,6 +67,7 @@ class UsersManager {
         this.addToken(doc);
       }
     }
+    this.abonents = abonents;
   }
 
   extractAuth(req) {
@@ -93,7 +94,7 @@ class UsersManager {
     })
       .then(res => res.json())
       .then(res => {
-        return res.ok && `org.couchdb.user:${res.username}`;
+        return res.ok && `org.couchdb.user:${res.userCtx.name}`;
       });
   }
 
@@ -128,8 +129,13 @@ class UsersManager {
       error.status = 401;
       throw error;
     }
-    req.user = user;
-    return user;
+    if(user.roles.includes("doc_full") || user.roles.includes("_admin")) {
+      req.user = user;
+      return user;
+    }
+    const error = new Error(`У пользователя '${authorization.username}', недостаточно прав для доступа к сервису`);
+    error.status = 401;
+    throw error;
   }
 
   addToken(user) {

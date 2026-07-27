@@ -1,6 +1,5 @@
 
 import querystring from 'node:querystring';
-import {nil} from '../listener/couchdb.js';
 import {LongPoller} from './longpoll.js';
 
 export const contentType = {'Content-Type': 'application/json; charset=utf-8'};
@@ -53,8 +52,9 @@ function getBody(req) {
 
 export class CouchdbImitator {
 
-  constructor(postgres) {
+  constructor(postgres, users) {
     this.postgres = postgres;
+    this.users = users;
 
     // текущие ожидатели long pool-а
     this.listeners = new Set();
@@ -109,9 +109,39 @@ export class CouchdbImitator {
     err404(pathname);
   }
 
-  async changesBody({since, limit, include_docs}) {
-    const {rows} = await this.postgres
-      .query('SELECT * FROM feed where seq > $1 ORDER BY seq LIMIT $2', [since, limit]);
+  async changesBody({since, limit, include_docs, attachments, selector}) {
+    let sql = `SELECT * FROM feed where year = ${selector.year}\n`;
+    const attr = [];
+
+    if(selector.abonent) {
+      attr.push(selector.abonent);
+      if(Array.isArray(selector.abonent)) {
+        sql += `and abonent = ANY ($${attr.length})\n`;
+      }
+      else {
+        sql += `and abonent = $${attr.length}\n`;
+      }
+    }
+
+    if(selector.branch) {
+      attr.push(selector.branch);
+      if(Array.isArray(selector.branch)) {
+        sql += `and branch = ANY ($${attr.length})\n`;
+      }
+      else {
+        sql += `and branch = $${attr.length}\n`;
+      }
+    }
+
+    if(since) {
+      attr.push(since);
+      sql += `and seq > $${attr.length}\n`;
+    }
+
+    attr.push(limit);
+    sql += `ORDER BY seq LIMIT $${attr.length}`;
+
+    const {rows} = await this.postgres.query(sql, attr);
 
     const last = rows[rows.length - 1];
     const body = {last_seq: last?.seq || since, pending: rows.length === limit ? 1e5 : 0};
@@ -158,12 +188,56 @@ export class CouchdbImitator {
   /**
    * @summary Компонует селектор из тела запроса и прав текущего пользователя
    * @param req
+   * @param since
    * @param filter
    * @return {Promise<void>}
    */
-  async changesSelector(req, filter) {
-    const {selector} = filter === 'selector' ? getBody(req) : {selector: {}};
+  async changesSelector({req, since, filter}) {
+    const {selector} = filter === 'selector' ? await getBody(req) : {selector: {}};
     const {user} = req;
+
+    const err = new Error('invalid selector');
+    err.status = 400;
+
+    if(!selector) {
+      err.reason = 'empty selector';
+      throw err;
+    }
+
+    if(!selector.year) {
+      selector.year = new Date().getFullYear();
+    }
+    else if(typeof selector.year !== 'number') {
+      err.reason = 'year field must be a number';
+      throw err;
+    }
+
+    if(selector.abonent) {
+      if(typeof selector.abonent !== 'number') {
+        err.reason = 'abonent field must be a number';
+        throw err;
+      }
+    }
+
+    if(selector.branch) {
+      if(typeof selector.branch !== 'number') {
+        err.reason = 'branch field must be a number';
+        throw err;
+      }
+      if(!selector.abonent) {
+        err.reason = 'abonent field must be defined for branch';
+        throw err;
+      }
+    }
+
+    if(!since && !selector.branch) {
+      const {abonents} = this.users;
+      if(!selector.abonent) {
+        selector.abonent = abonents.ids();
+      }
+      selector.branch = abonents.branches();
+    }
+
     return selector;
   }
 
@@ -200,9 +274,6 @@ export class CouchdbImitator {
     if(since === 'now') {
       since = await this.postgres.lastSeq();
     }
-    else if(!since) {
-      since = nil;
-    }
 
     if(typeof limit === 'string') {
       limit = parseInt(limit);
@@ -236,7 +307,7 @@ export class CouchdbImitator {
       attachments = false;
     }
 
-    const selector = await this.changesSelector(req, filter);
+    const selector = await this.changesSelector({req, since, filter});
     const body = await this.changesBody({since, limit, include_docs, attachments, selector});
 
     if (!body.results.length && feed === 'longpoll') {

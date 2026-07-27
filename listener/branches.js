@@ -57,6 +57,23 @@ class BranchesOrder {
     }
   }
 
+  ids() {
+    return this.#abonents.map(v => v.id);
+  }
+
+  branches(abonent) {
+    const res = new Set();
+    for(const {branches, id} of this.#abonents) {
+      if(abonent && abonent !== id) {
+        continue;
+      }
+      for(const branch of branches) {
+        res.add(branch.id);
+      }
+    }
+    return Array.from(res);
+  }
+
   /**
    * Ищет отдел по идентификатору
    * @param {String} ref

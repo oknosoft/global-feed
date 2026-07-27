@@ -24,7 +24,7 @@ setTimeout(async () => {
   log(`postgres initiated`);
 
   const users = await loadUsers();
-  const imitator = new CouchdbImitator(postgres);
+  const imitator = new CouchdbImitator(postgres, users);
 
   const ipLimiter = new RateLimiterMemory(opts);
 
@@ -60,7 +60,7 @@ setTimeout(async () => {
         }
         const user = await users.authorize(req, res);
         if(user) {
-          imitator.handler(req, res);
+          return imitator.handler(req, res);
         }
       })
       .catch((err) => {
