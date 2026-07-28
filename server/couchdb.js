@@ -270,15 +270,9 @@ export class CouchdbImitator {
       }
     }
 
-    if(selector.branch) {
-      if(typeof selector.branch !== 'number') {
-        err.reason = 'branch field must be a number';
-        throw err;
-      }
-      if(!selector.abonent) {
-        err.reason = 'abonent field must be defined for branch';
-        throw err;
-      }
+    if(selector.branch && !selector.abonent) {
+      err.reason = 'abonent field must be defined for branch';
+      throw err;
     }
 
     if(!since) {
