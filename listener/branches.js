@@ -8,11 +8,10 @@ import {Couchdb, nil} from './couchdb.js';
  */
 class BranchesOrder {
 
-  #abonents = null;
   #byRef = {};
 
   constructor(abonents) {
-    this.#abonents = abonents;
+    this.abonents = abonents;
     for(const abonent of abonents) {
       this.#byRef[abonent.ref] = abonent;
       for(const branch of abonent.branches) {
@@ -49,29 +48,12 @@ class BranchesOrder {
    * @param {String} name
    */
   branch(abonentId, name) {
-    const abonent = this.#abonents.find(v => v.id === abonentId);
+    const abonent = this.abonents.find(v => v.id === abonentId);
     if(abonent) {
       const index = name.lastIndexOf('_');
       const suffix = name.substring(index + 1);
       return abonent.branches.find(v => v.suffix === suffix);
     }
-  }
-
-  ids() {
-    return this.#abonents.map(v => v.id);
-  }
-
-  branches(abonent) {
-    const res = new Set();
-    for(const {branches, id} of this.#abonents) {
-      if(abonent && abonent !== id) {
-        continue;
-      }
-      for(const branch of branches) {
-        res.add(branch.id);
-      }
-    }
-    return Array.from(res);
   }
 
   /**

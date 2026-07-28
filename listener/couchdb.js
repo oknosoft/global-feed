@@ -1,5 +1,5 @@
 
-// import EventEmitter from 'node:events';
+import { Readable } from 'node:stream';
 import {sleepTimeout} from './postgres.js';
 
 export const nil = '00000000-0000-0000-0000-000000000000';
@@ -144,14 +144,45 @@ export class Couchdb {
    * @summary Аналог get() PouchDB
    * @return {Promise<*>}
    */
-  get(id, rev) {
+  get(id, rev, attachments) {
+    const {name, headers} = this;
+    let path = `${name}/${id}`;
+    if(rev) {
+      path += `?rev=${rev}`;
+    }
+    if(attachments) {
+      path += `${rev ? '&' : '?'}attachments=true`;
+    }
+    return fetch(path, {headers})
+      .then(res => res.json());
+  }
+
+  attachment(id, rev, res) {
     const {name, headers} = this;
     let path = `${name}/${id}`;
     if(rev) {
       path += `?rev=${rev}`;
     }
     return fetch(path, {headers})
-      .then(res => res.json());
+      .then(fetchRes => {
+        return new Promise((resolve, reject) => {
+          if(fetchRes.ok) {
+            for(const [name, value] of fetchRes.headers) {
+              res.setHeader(name, value);
+            }
+            res.setHeader('X-Duration', res.took());
+            Readable.fromWeb(fetchRes.body)
+              .pipe(res)
+              .on('error', reject)
+              .on('close', resolve);
+          }
+          else {
+            const err = new Error(`HTTP network error`);
+            err.status = fetchRes.status;
+            reject(err);
+          }
+        });
+      });
   }
 
   /**
