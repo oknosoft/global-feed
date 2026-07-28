@@ -5,53 +5,6 @@ import {LongPoller} from './longpoll.js';
 export const contentType = {'Content-Type': 'application/json; charset=utf-8'};
 const classNames = ['cat.characteristics', 'doc.calc_order'];
 const uuid = '019f8e43-7b66-7169-968c-6684112c5491';
-const seqs = {
-  "2018": {
-    "8": "019f0fc8-5a85-7221-bf56-c6956d5b99e2",
-    "21": "019f0f73-badc-705e-9aa2-6f22ae2150ae",
-    "22": "019f1d2c-bedf-73af-a8ec-d73eed18c302"
-  },
-  "2019": {
-    "8": "019f0fc8-5a85-7221-bf56-c6956d5b99e2",
-    "21": "019f0fc8-3f99-73e1-a904-7a0d3871faec",
-    "22": "019f1d2c-bedf-73af-a8ec-d73eed18c302"
-  },
-  "2020": {
-    "8": "019f193b-5b8f-7836-b05e-2250cdbc5990",
-    "21": "019f1294-8fdc-7289-911b-c82edcc2535d",
-    "22": "019f1d2c-bedf-73af-a8ec-d73eed18c302"
-  },
-  "2021": {
-    "8": "019f193b-5b8f-7836-b05e-2250cdbc5990",
-    "21": "019f17d5-d00d-75bd-bb0f-b9585962e3da",
-    "22": "019f1d2c-bedf-73af-a8ec-d73eed18c302"
-  },
-  "2022": {
-    "8": "019f1d2c-f404-75f5-a96e-6b25025dbae0",
-    "21": "019f1c61-dd1b-7f20-9d9c-c12b2a1957b5",
-    "22": "019f1d2c-bedf-73af-a8ec-d73eed18c302"
-  },
-  "2023": {
-    "8": "019f240f-2530-7273-903c-31e795fb02f3",
-    "21": "019f2426-168f-7526-8bd3-d42cb5694013",
-    "22": "019f2447-dca5-7381-8024-9a77a767ea61"
-  },
-  "2024": {
-    "8": "019f271e-dd41-73bc-85a9-23304d46da00",
-    "21": "019f2733-76be-784a-91fe-d9ae710f7b7b",
-    "22": "019f2718-0b08-7041-89d5-6d86ddd23be4"
-  },
-  "2025": {
-    "8": "019f2bb2-fb5c-7b66-bc7f-2c948f31f805",
-    "21": "019f2bcf-6932-7291-b26a-38f7cb000d9e",
-    "22": "019f2c73-334d-7a51-b40f-4c06c0dd8452"
-  },
-  "2026": {
-    "8": "019f7e89-c86b-7cdf-b217-db0e638e08c1",
-    "21": "019f7e97-85ba-7521-bdea-09da3e23f79c",
-    "22": "019f80d3-413f-764f-97ba-5cf3880d82c6"
-  }
-};
 
 
 function parse(url) {
@@ -160,7 +113,7 @@ export class CouchdbImitator {
             return ;
           }
           else {
-            servers.doc = await servers.direct.get(`${type}|${ref}`, rev);
+            servers.doc = await servers.direct.get(`${type}|${ref}`, rev, attachments);
           }
         }
         catch (e) {
@@ -208,6 +161,12 @@ export class CouchdbImitator {
       else {
         sql += `and branch = $${attr.length}\n`;
       }
+    }
+
+    const type = selector.type || selector.class_name;
+    if(type) {
+      attr.push(type);
+      sql += `and type = $${attr.length}\n`;
     }
 
     if(selector.since) {
@@ -292,6 +251,11 @@ export class CouchdbImitator {
       selector.year = 2018;
     }
 
+    const type = selector.type || selector.class_name;
+    if(type && (typeof type !== 'string' || !classNames.includes(type))) {
+      err.reason = 'invalid class_name';
+      throw err;
+    }
 
     if(selector.abonent) {
       if(typeof selector.abonent !== 'number') {
