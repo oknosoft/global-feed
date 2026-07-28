@@ -145,18 +145,16 @@ export class CouchdbImitator {
 
     if(selector.abonent) {
       attr.push(selector.abonent);
-      if(Array.isArray(selector.abonent)) {
-        sql += `and abonent = ANY ($${attr.length})\n`;
-      }
-      else {
-        sql += `and abonent = $${attr.length}\n`;
-      }
+      sql += `and abonent = $${attr.length}\n`;
     }
 
     if(selector.branch) {
       attr.push(selector.branch);
       if(Array.isArray(selector.branch)) {
         sql += `and branch = ANY ($${attr.length})\n`;
+      }
+      else if(selector.branch.$in) {
+        sql += `and branch = ANY ($${selector.branch.$in})\n`;
       }
       else {
         sql += `and branch = $${attr.length}\n`;
@@ -166,7 +164,15 @@ export class CouchdbImitator {
     const type = selector.type || selector.class_name;
     if(type) {
       attr.push(type);
-      sql += `and type = $${attr.length}\n`;
+      if(Array.isArray(type)) {
+        sql += `and type = ANY ($${attr.length})\n`;
+      }
+      else if(type.$in) {
+        sql += `and type = ANY ($${type.$in})\n`;
+      }
+      else {
+        sql += `and type = $${attr.length}\n`;
+      }
     }
 
     if(selector.since) {
