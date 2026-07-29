@@ -19,8 +19,8 @@ export class LongPoller {
   }
 
   async changed() {
-    const {owner, res, since, limit, include_docs, attachments, selector} = this.#attr;
-    const body = await owner.changesBody({since, limit, include_docs, attachments, selector});
+    const {owner, res, limit, include_docs, attachments, selector} = this.#attr;
+    const body = await owner.changesBody({limit, include_docs, attachments, selector});
     if(body.results.length) {
       // отключаем ping
       clearInterval(this.#attr.timer);

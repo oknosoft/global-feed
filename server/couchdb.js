@@ -5,6 +5,7 @@ import {LongPoller} from './longpoll.js';
 export const contentType = {'Content-Type': 'application/json; charset=utf-8'};
 const classNames = ['cat.characteristics', 'doc.calc_order'];
 const uuid = '019f8e43-7b66-7169-968c-6684112c5491';
+const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 
 function parse(url) {
@@ -85,12 +86,18 @@ export class CouchdbImitator {
       attachments = false;
     }
     let [type, ref] = pathname.split('|');
-    const isAttachment = ref.includes('/');
+    if(!classNames.includes(type)) {
+      err404(pathname, '', `type '${type}' not allowed`);
+    }
+    const isAttachment = ref?.includes('/');
     let att = '';
     if(isAttachment) {
       const index = ref.indexOf('/');
       att = ref.substring(index);
       ref = ref.substring(0, index);
+    }
+    if(!uuidRegex.test(ref)) {
+      err404(pathname, '', `invalid uuid '${ref}'`);
     }
     // если передали If-None-Match...
     if(!rev && headers['if-none-match']) {
@@ -332,7 +339,7 @@ export class CouchdbImitator {
       limit = parseInt(limit);
     }
     if(limit > 100) {
-      limit = 100;
+      err405(method, `limit should not be > 100`);
     }
 
     if(heartbeat === 'true') {
