@@ -71,7 +71,7 @@ export class CouchdbImitator {
   }
 
   async get(req, res) {
-    const {url, method, headers} = req;
+    const {url, method, headers, user} = req;
     let {pathname, rev, attachments, ...params} = parse(url);
     if(!pathname) {
       return this.info(res);
@@ -109,6 +109,17 @@ export class CouchdbImitator {
     }
     if(classNames.includes(type)) {
       const row = await this.postgres.docRow({type, ref, rev, strict: true});
+      // права на объект
+      if(user.branch) {
+        if(row.abonent !== user.branch.owner.id ||
+          (row.branch && row.branch !== user.branch.id) ||
+          user.acl.divisions && !user.acl.divisions.includes(row.department) ||
+          user.acl.partners && !user.acl.partners.includes(row.partner)) {
+          const error = new Error(`У пользователя '${user.name}', недостаточно прав для доступа к документу ${type}|${ref}${att}`);
+          error.status = 401;
+          throw error;
+        }
+      }
       if(row) {
         if(row.deleted) {
           return err404(pathname, null, 'deleted');
@@ -182,13 +193,38 @@ export class CouchdbImitator {
       }
     }
 
+    if(selector.partner) {
+      attr.push(selector.partner);
+      if(Array.isArray(selector.partner)) {
+        sql += `and partner = ANY ($${attr.length})\n`;
+      }
+      else if(selector.partner.$in) {
+        sql += `and partner = ANY ($${selector.partner.$in})\n`;
+      }
+      else {
+        sql += `and partner = $${attr.length}\n`;
+      }
+    }
+
+    if(selector.department) {
+      attr.push(selector.department);
+      if(Array.isArray(selector.department)) {
+        sql += `and department = ANY ($${attr.length})\n`;
+      }
+      else if(selector.department.$in) {
+        sql += `and department = ANY ($${selector.department.$in})\n`;
+      }
+      else {
+        sql += `and department = $${attr.length}\n`;
+      }
+    }
+
     if(selector.since) {
       attr.push(selector.since);
       sql += `and seq > $${attr.length}\n`;
     }
 
-    attr.push(limit);
-    sql += `ORDER BY seq LIMIT $${attr.length}`;
+    sql += `ORDER BY seq LIMIT ${limit}`;
 
     const {rows} = await this.postgres.query(sql, attr);
 
@@ -242,15 +278,31 @@ export class CouchdbImitator {
    * @return {Promise<void>}
    */
   async changesSelector({req, since, filter}) {
-    const {selector} = filter === 'selector' ? await getBody(req) : {selector: {}};
-    const {user} = req;
+    let {selector} = filter === 'selector' ? await getBody(req) : {selector: {}};
+    const {branch, acl} = req.user;
 
     const err = new Error('invalid selector');
     err.status = 400;
 
     if(!selector) {
-      err.reason = 'empty selector';
-      throw err;
+      if(branch) {
+        selector = {};
+      }
+      else {
+        err.reason = 'empty selector';
+        throw err;
+      }
+    }
+
+    if(branch) {
+      selector.abonent = branch.owner.id;
+      selector.branch = branch.id;
+      if(acl.divisions?.length) {
+        selector.department = [...acl.divisions];
+      }
+      if(acl.partners?.length) {
+        selector.partner = [...acl.partners];
+      }
     }
 
     if(!selector.year) {
