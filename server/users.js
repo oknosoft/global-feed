@@ -129,7 +129,10 @@ class UsersManager {
       error.status = 401;
       throw error;
     }
-    if(user.roles.includes("doc_full") || user.roles.includes("_admin")) {
+    const {roles, branch} = user;
+    if(roles.includes("doc_full") ||
+      roles.includes("_admin") ||
+      user.branch && (roles.includes("doc_reader") || roles.includes("doc_editor"))) {
       req.user = user;
       return user;
     }
